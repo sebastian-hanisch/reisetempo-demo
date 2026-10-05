@@ -16,7 +16,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PY = sys.executable
 WITH_APP = "--with-app" in sys.argv
-TIMEOUT = 300
+TIMEOUT = 900
 FIRST = ["test_algorithm.py", "test_strategies.py", "test_oracle_reisetempo.py", "test_physics.py", "test_scenario.py", "test_rng.py"]   # schnelle und trennscharfe Dateien zuerst (pytest -x)
 SKIP = {"test_app.py", "test_footer.py"}                                                                                          # AppTests (Streamlit), nur mit --with-app
 

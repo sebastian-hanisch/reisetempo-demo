@@ -99,7 +99,15 @@ Standardfall der Messreihe: Pkw (77 kWh), hügelige Strecke von 600 km, 20 °C, 
 
 ## Tests
 
-TODO-ZAHLEN
+424 Tests; der Lauf unter Linux mit frisch installierten, ungepinnten Paketen (wie die CI) ist grün (`python tools/demo_linux_check.py reisetempo-demo`, 50 s), unter Windows dauern die AppTests länger.
+
+- **Mini-Instanzen je Einheit** mit von Hand gerechneten Erwartungen: Verbrauch, Ladeleistung und Ladezeit (Tabelle gegen geschlossene Formel), Szenario und Höhenprofil, Interpolation, Laden, Wertfunktion auf einer Strecke aus zwei Zellen, Praxisregel, Meldungen und Presets.
+- **Orakel (45 Tests):** Vollaufzählung aller Entscheidungsfolgen auf sieben Mini-Szenarien (eben, Gefälle mit Rekuperation, Gegenwind, Kälte, gemischt, kleiner Akku): Das DP liegt höchstens 0,7 % über der Aufzählung und nie darunter (Rasterfehler);
+  geschlossene Formel für einen einzelnen Stopp; Ladezeit gegen numerische Quadratur; Energie gegen eine eigene Leistungsbilanz; jeder Plan gegen die unabhängige Nachrechnung.
+- **Messreihe und Presets:** jede Zahl der Befunde-Tabelle (30 Tests); Abnahmekriterien aller sieben Presets an Lauf und Messreihe, jedes Kriterium kippt einzeln an seiner Schwelle.
+- **Oberfläche:** 12 AppTests (jeder Button und Preset, jeder Regler am Minimum und Maximum, jede Option jeder Auswahl, Fahrzeugwahl, Permalink mit Einrasten und Begrenzen, nicht erreichbares Ziel) und der Footer-Test.
+- **Fehler-Einbau** (`tools/mutation_check.py`): 56 Fehler in Physik, DP, Praxisregel und Szenario, einzeln in einer Kopie eingebaut; 55 werden von den Tests gefunden, einer ist gleichwertig (das Suffix-Minimum ohne Verschiebung ist bei positiver Fixzeit wirkungslos, und die Fixzeit ist per Regler mindestens 1 min).
+- **Zwei Fehler, die erst die Tests fanden:** Das Ladestandsraster war bei großen Akkus zu grob (Elektro-Lkw: DP-Wert und Nachfahrt wichen bis zu 3,6 % ab, jetzt höchstens 0,25 kWh je Stufe); der Gerüst-Test importierte eine nicht mehr vorhandene Klasse.
 
 ## Dateistruktur
 
