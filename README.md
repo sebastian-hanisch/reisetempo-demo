@@ -1,7 +1,6 @@
 # Reisegeschwindigkeit: Wie schnell fahren, wenn man laden muss? (Streamlit-Demo)
 
-<!-- TODO nach dem Deploy: direkt hierher den Live-Link setzen (Leerzeile davor und danach):
-**[→ Demo live ausprobieren](https://sebastianhanisch-reisetempo-demo.streamlit.app/)** -->
+**[→ Demo live ausprobieren](https://sebastianhanisch-reisetempo-demo.streamlit.app/)**
 
 Interaktive **Fall-Demo** zur zeitminimalen Reiseplanung eines Elektrofahrzeugs im Portfolio von [Sebastian Hanisch](https://sebastianhanisch.net) (Operations Research und Machine Learning), Gruppe Transport & Tourenplanung.
 Gegenstück zur [Ladestrategie](https://github.com/sebastian-hanisch/ladestrategie-demo): Dort wird bei fester Geschwindigkeit und festen Ladesäulen die **Energie** minimiert und das Batterieheizen gewählt; hier wird die
