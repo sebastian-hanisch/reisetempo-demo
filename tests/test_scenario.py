@@ -153,29 +153,29 @@ def test_changing_wind_does_not_change_the_height_profile():
 
 
 # ------------------------------------------------------------------ Geschwindigkeitsraster
-def test_speed_grid_runs_from_40_to_the_limit_in_steps_of_5():
+def test_speed_grid_runs_from_the_minimum_speed_to_the_limit_in_steps_of_5():
     g = S.speed_grid(130)
-    assert g[0] == 40 and g[-1] == 130 and len(g) == 19 and all(b - a == 5 for a, b in zip(g, g[1:]))       # (130 − 40) / 5 + 1
-    assert len(S.speed_grid(180)) == 29
+    assert C.V_MIN == 60 and g[0] == 60 and g[-1] == 130 and len(g) == 15 and all(b - a == 5 for a, b in zip(g, g[1:]))       # (130 − 60) / 5 + 1
+    assert len(S.speed_grid(180)) == 25
 
 
 def test_speed_grid_rounds_the_limit_down_to_the_grid_and_has_a_minimum():
     assert S.speed_grid(133)[-1] == 130 and S.speed_grid(134.9)[-1] == 130 and S.speed_grid(135)[-1] == 135
-    assert S.speed_grid(40) == [40] and S.speed_grid(42) == [40] and S.speed_grid(10) == [40]
-    assert S.speed_grid(45) == [40, 45]
+    assert S.speed_grid(60) == [60] and S.speed_grid(62) == [60] and S.speed_grid(10) == [60]
+    assert S.speed_grid(65) == [60, 65]
     assert all(isinstance(v, int) for v in S.speed_grid(90))
 
 
 # ------------------------------------------------------------------ Fahrt
 SETTINGS = {"vehicle": "Pkw", "cap": 80.0, "mass": 2100.0, "cda": 0.7, "cr": 0.012, "peak": 120.0, "aux": 1.2, "curve": "Lange Spitze", "loss": 12.0, "stop_min": 15.0, "length": 200,
-            "profile": "pass", "rise": 100, "seed": 3, "headwind": 10, "wind_mode": "wechselnd", "temp": -5, "soc0": 50, "smin_stop": 10, "smin_dest": 5, "vmax": 140}
+            "profile": "pass", "rise": 100, "seed": 3, "headwind": 10, "wind_mode": "wechselnd", "tv": 20, "price": 0.6, "soc0": 50, "smin_stop": 10, "smin_dest": 5, "vmax": 140}
 
 
 def test_make_trip_converts_percent_to_kwh_and_minutes_to_hours():
     t = S.make_trip(SETTINGS)
     assert t.soc0 == pytest.approx(40.0) and t.smin_stop == pytest.approx(8.0) and t.smin_dest == pytest.approx(4.0)      # 80 kWh · 50 %, 10 %, 5 %
     assert t.stop_h == pytest.approx(0.25)                                                                                 # 15 min
-    assert t.vmax == 140 and t.loss == 12.0 and t.temp == -5.0 and isinstance(t.vmax, int)
+    assert t.vmax == 140 and t.loss == 12.0 and isinstance(t.vmax, int)
     v = t.vehicle
     assert (v.cap, v.mass, v.cda, v.cr, v.peak, v.aux, v.curve) == (80.0, 2100.0, 0.7, 0.012, 120.0, 1.2, "Lange Spitze")
 
@@ -196,3 +196,23 @@ def test_make_trip_without_rise_means_zero_and_the_base_scenario_works():
 def test_vehicle_is_immutable():
     with pytest.raises(dataclasses.FrozenInstanceError):
         S.make_trip(SETTINGS).vehicle.cap = 1.0
+
+
+# ------------------------------------------------------------------ Gewichte der Zielfunktion
+def test_objective_weights_by_hand():
+    # Zeit allein: Zielfunktion = Reisezeit in Stunden, die Energie kostet nichts
+    assert S.objective_weights(C.TV_FAST, 0.5, 10.0) == (1.0, 0.0)
+    assert S.objective_weights(C.TV_FAST + 5, 0.9, 30.0) == (1.0, 0.0)
+    # 20 €/h, 0,45 €/kWh bei 10 % Ladeverlust: eine Batterie-kWh kostet 0,45 / 0,9 = 0,5 €
+    wt, we = S.objective_weights(20, 0.45, 10.0)
+    assert wt == 20.0 and we == pytest.approx(0.5)
+    assert S.objective_weights(1, 0.6, 25.0)[1] == pytest.approx(0.8) and S.objective_weights(1, 0.6, 0.0)[1] == pytest.approx(0.6)
+
+
+def test_make_trip_sets_the_weights_from_the_time_value_the_price_and_the_loss():
+    t = S.make_trip({**SETTINGS, "tv": 30, "price": 0.45, "loss": 10.0})
+    assert t.w_time == 30.0 and t.w_energy == pytest.approx(0.5)
+    fast = S.make_trip({**SETTINGS, "tv": C.TV_FAST})
+    assert fast.w_time == 1.0 and fast.w_energy == 0.0
+    assert S.make_trip(C.BASE_SCENARIO).w_time == float(C.DEFAULT_TV)
+    assert S.make_trip(C.BASE_SCENARIO).w_energy == pytest.approx(C.DEFAULT_PRICE / (1.0 - C.DEFAULT_LOSS / 100.0))

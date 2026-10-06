@@ -164,9 +164,19 @@ def test_power_gap_has_one_line_per_comparison_method_with_the_summary_values(re
     assert list(fig.data[0].x) == ["50", "100", "150", "250", "350"] and fig.layout.xaxis.type == "category"
     for t, key in zip(fig.data, ("rule", "const_max", "const_best")):
         assert list(t.y) == [R.power_summary(res, p, 160)[f"gap_{key}"] for p in res["meta"]["peaks"]] and t.line.color == C.METHOD_COLORS[key]
-    rows = rows_where(res, "power", peak=50.0, vmax=160)
+    rows = rows_where(res, "power", peak=50.0, vmax=160, tv=C.TV_FAST)
     assert fig.data[0].y[0] == pytest.approx(st.mean(100 * (r["t_rule"] / r["t_opt"] - 1) for r in rows))          # Gegenprobe direkt aus den Zeilen
     assert all(ax.fixedrange is True for ax in all_axes(fig))
+
+
+def test_power_gap_of_the_priced_cell_uses_the_cost_and_labels_the_axis_accordingly(res):
+    fig = V.build_power_gap(res, 160, 20)
+    for t, key in zip(fig.data, ("rule", "const_max", "const_best")):
+        assert list(t.y) == [R.power_summary(res, p, 160, 20)[f"gap_{key}"] for p in res["meta"]["peaks"]]
+    rows = rows_where(res, "power", peak=50.0, vmax=160, tv=20)
+    assert fig.data[0].y[0] == pytest.approx(st.mean(100 * (r["j_rule"] / r["j_opt"] - 1) for r in rows))
+    assert fig.layout.yaxis.title.text == "Kosten über dem Optimum (%)" and V.build_power_gap(res, 160).layout.yaxis.title.text == "Reisezeit über dem Optimum (%)"
+    assert fig.data[0].y[0] > V.build_power_gap(res, 160).data[0].y[0]                                  # bei 20 €/h verschenkt das Tempolimit mehr (Energie) als bei Zeit allein
 
 
 def test_best_speed_has_one_line_per_speed_limit_and_stays_below_the_limit(res):
@@ -176,19 +186,8 @@ def test_best_speed_has_one_line_per_speed_limit_and_stays_below_the_limit(res):
         assert list(t.x) == ["50", "100", "150", "250", "350"] and all(C.V_MIN <= y <= vmax for y in t.y), vmax
         assert list(t.y) == [R.power_summary(res, p, vmax)["v_best"] for p in res["meta"]["peaks"]]
     assert all(ax.fixedrange is True for ax in all_axes(fig))
-
-
-def test_temperature_lines_are_zero_at_20_degrees_and_rise_in_the_cold(res):
-    fig = V.build_temp(res)
-    assert [t.name for t in fig.data] == ["300 km", "600 km", "1000 km"]
-    for t in fig.data:
-        assert list(t.x) == ["-20", "-10", "0", "10", "20", "30"]
-        assert t.y[4] == pytest.approx(0.0, abs=1e-9) and t.y[0] > t.y[1] > t.y[2] > t.y[3] > 0, t.name                  # 20 °C ist die Basis, je kälter, desto länger
-        assert t.y[5] == pytest.approx(0.0, abs=1e-9), t.name                                                              # über 20 °C gibt es keinen Kälteeffekt mehr
-    long = fig.data[2]
-    ref = st.mean(r["t_opt"] for r in rows_where(res, "temp", temp=20, length=1000))
-    assert long.y[0] == pytest.approx(100 * (st.mean(r["t_opt"] for r in rows_where(res, "temp", temp=-20, length=1000)) / ref - 1))
-    assert all(ax.fixedrange is True for ax in all_axes(fig))
+    priced = V.build_best_speed(res, 20)
+    assert list(priced.data[3].y) == [R.power_summary(res, p, 180, 20)["v_best"] for p in res["meta"]["peaks"]] and max(priced.data[3].y) < 130          # bei 20 €/h fährt niemand 180
 
 
 def test_wind_lines_average_the_four_profiles_and_fall_with_headwind(res):
@@ -207,10 +206,90 @@ def test_vehicle_bars_show_the_rule_gap_with_error_bars(res):
     names = list(res["meta"]["vehicles"])
     assert list(fig.data[0].x) == names and list(fig.data[0].y) == [R.vehicle_summary(res, v, 600)["gap_rule"] for v in names]
     assert list(fig.data[0].error_y.array) == [R.vehicle_summary(res, v, 600)["gap_rule_se"] for v in names] and fig.data[0].marker.color == C.METHOD_COLORS["rule"]
-    assert fig.data[0].y[1] == pytest.approx(st.mean(100 * (r["t_rule"] / r["t_opt"] - 1) for r in rows_where(res, "vehicle", vehicle="Pkw", length=600)))
+    assert fig.data[0].y[1] == pytest.approx(st.mean(100 * (r["t_rule"] / r["t_opt"] - 1) for r in rows_where(res, "vehicle", vehicle="Pkw", length=600, tv=C.TV_FAST)))
+    assert all(ax.fixedrange is True for ax in all_axes(fig))
+    priced = V.build_vehicles(res, 600, 20)
+    assert list(priced.data[0].y) == [R.vehicle_summary(res, v, 600, 20)["gap_rule"] for v in names]
+    assert priced.data[0].y[1] == pytest.approx(st.mean(100 * (r["j_rule"] / r["j_opt"] - 1) for r in rows_where(res, "vehicle", vehicle="Pkw", length=600, tv=20)))
+
+
+def test_spectrum_sweep_has_one_line_per_vehicle_normalised_to_time_alone(res):
+    fig = V.build_spectrum_sweep(res, 600)
+    names = list(res["meta"]["vehicles"])
+    assert [t.name for t in fig.data] == names and all(len(t.x) == len(C.TV_OPTIONS) for t in fig.data)
+    for t, name in zip(fig.data, names):
+        pts = R.spectrum(res, name, 600)
+        assert t.x[-1] == pytest.approx(100.0) and t.y[-1] == pytest.approx(100.0)                      # „Zeit allein“ ist die Bezugsgröße
+        assert list(t.x) == pytest.approx([100.0 * p["t_opt"] / pts[-1]["t_opt"] for p in pts]) and list(t.y) == pytest.approx([100.0 * p["cons_opt"] / pts[-1]["cons_opt"] for p in pts])
+        assert t.x[0] > 120 and t.y[0] < 80, name                                                         # sparsam: deutlich langsamer, deutlich weniger Verbrauch
+        assert list(t.text) == [C.tv_label(tv) for tv in C.TV_OPTIONS]
     assert all(ax.fixedrange is True for ax in all_axes(fig))
 
 
+def test_energy_bars_show_the_consumption_of_every_reachable_method(real_run):
+    fig = V.build_energy_bars(real_run)
+    assert list(fig.data[0].x) == [C.METHOD_LABELS[k] for k in C.METHODS] and list(fig.data[0].y) == pytest.approx([E.consumption(real_run, k) for k in C.METHODS])
+    assert list(fig.data[0].marker.color) == [C.METHOD_COLORS[k] for k in C.METHODS] and all(ax.fixedrange is True for ax in all_axes(fig))
+    run = fake_trip_run()
+    run["plans"]["const_max"] = unreachable("const_max")
+    assert list(V.build_energy_bars(run).data[0].x) == [C.METHOD_LABELS[k] for k in ("rule", "const_best", "opt")]
+
+
+def spectrum_inputs(settings=None):
+    s = settings or C.PRESETS["Standard"]
+    return E.run_live(s), E.frontier(s), E.speed_curve(s)
+
+
+def test_spectrum_figure_has_frontier_speed_curve_cost_line_and_four_method_points():
+    run, front, curve = spectrum_inputs()
+    fig = V.build_spectrum(run, front, curve)
+    assert [t.name for t in fig.data] == ["Konstante Geschwindigkeit", "Optimum je Zeitwert", "Gleiche Kosten"] + [C.METHOD_LABELS[k] for k in C.METHODS]
+    cur, fr = fig.data[0], fig.data[1]
+    assert list(cur.x) == pytest.approx([c["time_min"] / 60 for c in curve]) and list(cur.y) == pytest.approx([c["energy_cost"] for c in curve]) and list(cur.customdata) == [f"{c['v']} km/h" for c in curve]
+    assert list(fr.x) == pytest.approx([f["time_min"] / 60 for f in front]) and list(fr.y) == pytest.approx([f["energy_cost"] for f in front]) and list(fr.customdata) == [C.tv_label(f["tv"]) for f in front]
+    assert [t for t in fr.text if t] == [C.tv_label(tv) for tv in V.SPECTRUM_LABELLED] and all(t == (C.tv_label(f["tv"]) if f["tv"] in V.SPECTRUM_LABELLED else "") for t, f in zip(fr.text, front))
+    for t, key in zip(fig.data[3:], C.METHODS):
+        p = run["plans"][key]
+        assert list(t.x) == [p.time_h] and list(t.y) == [E.energy_cost(run, key)] and t.marker.color == C.METHOD_COLORS[key] and t.marker.symbol == "diamond"
+    assert fig.layout.xaxis.title.text == "Reisezeit (h)" and fig.layout.yaxis.title.text == "Energiekosten (€)" and all(ax.fixedrange is True for ax in all_axes(fig))
+
+
+def test_spectrum_axes_cover_exactly_the_points_and_cut_the_cost_line():
+    run, front, curve = spectrum_inputs()
+    fig = V.build_spectrum(run, front, curve)
+    xs = [c["time_min"] / 60 for c in curve] + [f["time_min"] / 60 for f in front] + [run["plans"][k].time_h for k in C.METHODS]
+    ys = [c["energy_cost"] for c in curve] + [f["energy_cost"] for f in front] + [E.energy_cost(run, k) for k in C.METHODS]
+    (x0, x1), (y0, y1) = fig.layout.xaxis.range, fig.layout.yaxis.range
+    assert x0 < min(xs) and x1 > max(xs) and y0 < min(ys) and y1 > max(ys) and x1 - x0 < 1.2 * (max(xs) - min(xs)) and y1 - y0 < 1.3 * (max(ys) - min(ys))
+    line = fig.data[2]
+    assert min(line.y) < y0                                                                      # die Gerade reicht über den sichtbaren Bereich hinaus und wird abgeschnitten
+    assert V.build_spectrum(run, [], []).layout.yaxis.range is not None
+
+
+def test_spectrum_cost_line_has_the_slope_minus_time_value_and_touches_the_optimum():
+    run, front, curve = spectrum_inputs()
+    line = V.build_spectrum(run, front, curve).data[2]
+    (x0, x1), (y0, y1) = line.x, line.y
+    assert (y1 - y0) / (x1 - x0) == pytest.approx(-run["trip"].w_time)                                    # Steigung = −Zeitwert (€ je Stunde, Zeit in Stunden)
+    opt = run["plans"]["opt"]
+    assert y0 + (opt.time_h - x0) * (y1 - y0) / (x1 - x0) == pytest.approx(E.energy_cost(run, "opt"))        # die Gerade geht durch das gewählte Optimum
+    # Gewichtssummen-Eigenschaft: kein Punkt der Spanne und keine konstante Geschwindigkeit liegt unterhalb der Geraden (Rasterrauschen 0,5 %)
+    def below(x, y):
+        return y + run["trip"].w_time * x < E.energy_cost(run, "opt") + run["trip"].w_time * opt.time_h - 0.005 * (E.energy_cost(run, "opt") + run["trip"].w_time * opt.time_h)
+    assert not any(below(f["time_min"] / 60, f["energy_cost"]) for f in front) and not any(below(c["time_min"] / 60, c["energy_cost"]) for c in curve)
+
+
+def test_spectrum_figure_without_a_cost_line_for_time_alone_and_without_unreachable_methods():
+    s = C.PRESETS["Möglichst schnell"]
+    run, front, curve = spectrum_inputs(s)
+    fig = V.build_spectrum(run, front, curve)
+    assert [t.name for t in fig.data] == ["Konstante Geschwindigkeit", "Optimum je Zeitwert"] + [C.METHOD_LABELS[k] for k in C.METHODS]            # bei „Zeit allein“ gibt es keine Kostengerade
+    run["plans"]["rule"] = unreachable("rule")
+    assert "Praxisregel" not in [t.name for t in V.build_spectrum(run, front, curve).data]
+    assert [t.name for t in V.build_spectrum(run, [], []).data][:2] == ["Konstante Geschwindigkeit", "Optimum je Zeitwert"]
+
+
 def test_all_figures_have_a_fixed_layout_height(res, real_run):
-    for fig in (V.build_trip(real_run, "opt"), V.build_time_bars(real_run), V.build_power_gap(res, 130), V.build_best_speed(res), V.build_temp(res), V.build_wind(res), V.build_vehicles(res, 600)):
+    for fig in (V.build_trip(real_run, "opt"), V.build_time_bars(real_run), V.build_energy_bars(real_run), V.build_power_gap(res, 130), V.build_best_speed(res), V.build_wind(res), V.build_vehicles(res, 600),
+                V.build_spectrum_sweep(res, 600), V.build_spectrum(real_run, E.frontier(real_run["settings"]), E.speed_curve(real_run["settings"]))):
         assert fig.layout.height is not None and fig.layout.height >= 340

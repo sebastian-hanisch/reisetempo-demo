@@ -103,7 +103,7 @@ def test_make_grid_has_n_soc_equal_steps_from_zero_to_capacity():
 
 
 def test_cell_energies_is_a_matrix_cells_by_speeds_with_the_hand_values():
-    # Fahrzeug 1000 kg, cr = cda = 0, aux 6 kW; Zelle 0 eben, Zelle 1 mit 10 % Steigung, Zelle 2 mit 10 % Gefälle; Geschwindigkeiten 50 und 100 km/h, 20 °C.
+    # Fahrzeug 1000 kg, cr = cda = 0, aux 6 kW; Zelle 0 eben, Zelle 1 mit 10 % Steigung, Zelle 2 mit 10 % Gefälle; Geschwindigkeiten 50 und 100 km/h.
     # eben: nur aux: 6 · 5 / 50 = 0,6 bzw. 6 · 5 / 100 = 0,3.
     # Steigung 10 %: sin(arctan 0,1) = 0,0995037 → Kraft 1000 · 9,81 · 0,0995037 = 976,13 N, Arbeit 976,13 · 5000 / 3,6e6 = 1,35574 kWh, / 0,9 = 1,50638: + 0,6 = 2,10638 bzw. + 0,3 = 1,80638
     # Gefälle 10 %: −1,35574 · 0,65 = −0,88123: + 0,6 = −0,28123 bzw. + 0,3 = −0,58123
@@ -122,7 +122,7 @@ def _two_cell_trip(stop_h):
 def _two_cell_functions(stop_h):
     trip = _two_cell_trip(stop_h)
     grid, ds = A.make_grid(10.0)
-    tch = P.charge_time_table(trip.vehicle, trip.temp, trip.loss, grid)
+    tch = P.charge_time_table(trip.vehicle, trip.loss, grid)
     E = A.cell_energies(trip, [50])
     f, g = A.value_functions(trip, [50], E, grid, ds, tch)
     return trip, grid, f, g
@@ -169,7 +169,7 @@ def test_solve_without_a_stop_takes_the_fastest_speed(flat_curve):
     plan = A.solve(trip, [50, 100], "opt")
     assert plan.feasible and plan.method == "opt" and plan.stops == []
     assert plan.v.tolist() == [100.0] * 4
-    assert plan.time_h == pytest.approx(0.2) and plan.value_h == pytest.approx(0.2)
+    assert plan.time_h == pytest.approx(0.2) and plan.value == pytest.approx(0.2)
     assert plan.drive_h == pytest.approx(0.2) and plan.charge_h == 0.0 and plan.fix_h == 0.0 and plan.charged_kwh == 0.0
     assert plan.soc_end == pytest.approx(8.74) and plan.energy.tolist() == pytest.approx([0.315] * 4)
     assert plan.time_min == pytest.approx(12.0) and plan.mean_speed == pytest.approx(100.0)
@@ -184,7 +184,7 @@ def test_solve_with_one_necessary_stop_charges_just_enough(flat_curve):
     assert plan.feasible and len(plan.stops) == 1
     st = plan.stops[0]
     assert st.km in (0.0, 5.0, 10.0) and 100 * (2.5 - 0.63 * st.km / 5) / 10 == pytest.approx(st.soc_from)
-    assert plan.time_h == pytest.approx(0.72967, abs=1e-3) and plan.value_h == pytest.approx(0.72967, abs=1e-3)
+    assert plan.time_h == pytest.approx(0.72967, abs=1e-3) and plan.value == pytest.approx(0.72967, abs=1e-3)
     assert plan.fix_h == pytest.approx(0.1) and plan.drive_h == pytest.approx(0.6)
     assert plan.charged_kwh == pytest.approx(1.78, abs=0.05) and 0.5 <= plan.soc_end <= 0.56
     assert plan.charge_h == pytest.approx(plan.charged_kwh / 60.0)
@@ -199,14 +199,14 @@ def test_solve_charges_at_the_start_when_the_start_is_below_the_minimum_for_a_st
     st = plan.stops[0]
     assert st.km == 0.0 and st.soc_from == pytest.approx(10.0) and st.soc_to == pytest.approx(22.8)
     assert st.charge_min == pytest.approx(60 * 1.28 / 60) and st.total_min == pytest.approx(1.28 + 6.0)
-    assert plan.time_h == pytest.approx(0.2 + 0.1 + 1.28 / 60) and plan.value_h == pytest.approx(0.2 + 0.1 + 1.28 / 60)
+    assert plan.time_h == pytest.approx(0.2 + 0.1 + 1.28 / 60) and plan.value == pytest.approx(0.2 + 0.1 + 1.28 / 60)
     assert plan.soc_end == pytest.approx(22.8 * 0.1 - 1.26) and plan.charged_kwh == pytest.approx(1.28)
 
 
 def test_solve_is_infeasible_with_a_note_if_the_destination_cannot_be_reached(flat_curve):
     # Mindestladestand am Ziel 11 kWh über der Kapazität 10: nie erreichbar
     plan = A.solve(mini_trip(3, smin_dest=11.0), [50])
-    assert not plan.feasible and math.isnan(plan.time_h) and plan.value_h is None and "nicht erreichbar" in plan.note and plan.stops == []
+    assert not plan.feasible and math.isnan(plan.time_h) and plan.value is None and "nicht erreichbar" in plan.note and plan.stops == []
     # Akku 1 kWh, Mindestladestand am Stopp 0,5: nach einer Zelle (0,63) bleibt höchstens 0,37 < 0,5, ein zweiter Stopp ist nie erlaubt, vier Zellen brauchen 2,52 kWh
     plan2 = A.solve(mini_trip(4, cap=1.0, soc0=1.0, smin_stop=0.5, smin_dest=0.0), [50])
     assert not plan2.feasible and "nicht erreichbar" in plan2.note
@@ -249,7 +249,7 @@ def test_trace_starts_at_the_initial_soc_and_ends_at_the_final_soc(flat_curve):
 
 
 def test_time_is_the_sum_of_driving_charging_and_fixed_time_in_every_plan():
-    for name in ("Standard", "Kälte", "Gegenwind", "Langsamer Lader"):
+    for name in ("Standard", "Möglichst sparsam", "Gegenwind", "Langsamer Lader"):
         trip, plans = preset_run(name)
         for plan in plans.values():
             if not plan.feasible:
@@ -261,7 +261,7 @@ def test_time_is_the_sum_of_driving_charging_and_fixed_time_in_every_plan():
             assert plan.charged_kwh == pytest.approx(sum((s.soc_to - s.soc_from) * trip.vehicle.cap / 100.0 for s in plan.stops), rel=1e-9, abs=1e-9)
             assert plan.trace[0] == (0.0, trip.soc0) and plan.trace[-1][1] == pytest.approx(plan.soc_end)
             assert plan.trace[-1][0] == pytest.approx(trip.route.length)
-            assert plan.energy.tolist() == pytest.approx([P.cell_energy(trip.vehicle, plan.v[i], trip.temp, trip.route.grade[i], trip.route.wind[i]) for i in range(trip.route.n)])
+            assert plan.energy.tolist() == pytest.approx([P.cell_energy(trip.vehicle, plan.v[i], trip.route.grade[i], trip.route.wind[i]) for i in range(trip.route.n)])
 
 
 def test_minimum_state_of_charge_holds_at_every_stop_and_at_the_destination_in_every_plan():
@@ -281,34 +281,35 @@ def test_minimum_state_of_charge_holds_at_every_stop_and_at_the_destination_in_e
 
 # ------------------------------------------------------------------ Eigenschaften der Verfahren
 @pytest.mark.parametrize("name", C.PRESET_ORDER)
-def test_optimum_is_not_slower_than_the_best_constant_which_is_not_slower_than_any_single_speed(name):
+def test_optimum_is_not_costlier_than_the_best_constant_which_is_not_costlier_than_any_single_speed(name):
     trip, plans = preset_run(name)
     opt, best = plans["opt"], plans["const_best"]
     assert opt.feasible and best.feasible
-    assert opt.time_h <= best.time_h * 1.003
+    assert A.plan_cost(trip, opt) <= A.plan_cost(trip, best) * 1.003
     for v, p in single_speed_plans(name).items():
         if p.feasible:
-            assert best.time_h <= p.time_h * 1.003, (name, v)
+            assert A.plan_cost(trip, best) <= A.plan_cost(trip, p) * 1.003, (name, v)
     assert len(set(best.v.tolist())) == 1                         # konstant: eine Geschwindigkeit für alle Zellen
-    assert best.time_h <= plans["const_max"].time_h * 1.003
+    assert A.plan_cost(trip, best) <= A.plan_cost(trip, plans["const_max"]) * 1.003
 
 
 @pytest.mark.parametrize("name", C.PRESET_ORDER)
-def test_dp_value_is_close_to_the_replay_time(name):
+def test_dp_value_is_close_to_the_replay_cost(name):
     trip, plans = preset_run(name)
     for key in ("opt", "const_best", "const_max"):
         p = plans[key]
-        assert abs(p.value_h - p.time_h) <= 0.005 * p.time_h, (name, key)
+        assert abs(p.value - A.plan_cost(trip, p)) <= 0.005 * A.plan_cost(trip, p), (name, key)
 
 
-def test_dp_value_is_close_to_the_replay_time_with_a_large_battery():
+def test_dp_value_is_close_to_the_replay_cost_with_a_large_battery():
     # Regression: Mit 500 Stufen bei 600 kWh (1,2 kWh je Stufe) legte die Nachfahrt einen Zusatzstopp ein (Wert 2,6176 h gegen Zeit 2,6978 h, 3,1 %);
-    # die Stufenweite ist deshalb auf DS_MAX begrenzt.
-    s = {**C.BASE_SCENARIO, **C.vehicle_scenario("Elektro-Lkw"), "length": 150, "profile": "flach", "seed": 3871, "headwind": 0, "temp": -10, "soc0": 30, "vmax": 180, "peak": 250.0,
-         "stop_min": 5.0, "rise": 500}
-    trip = S.make_trip(s)
-    plan = A.best_constant(trip, S.speed_grid(trip.vmax))
-    assert plan.feasible and abs(plan.value_h - plan.time_h) <= 0.005 * plan.time_h
+    # die Stufenweite ist deshalb auf DS_MAX begrenzt. Geprüft für die reine Reisezeit und für einen Zeitwert von 20 €/h.
+    for tv in (C.TV_FAST, 20):
+        s = {**C.BASE_SCENARIO, **C.vehicle_scenario("Elektro-Lkw"), "length": 150, "profile": "flach", "seed": 3871, "headwind": 0, "soc0": 30, "vmax": 180, "peak": 250.0,
+             "stop_min": 5.0, "rise": 500, "tv": tv}
+        trip = S.make_trip(s)
+        plan = A.best_constant(trip, S.speed_grid(trip.vmax))
+        assert plan.feasible and abs(plan.value - A.plan_cost(trip, plan)) <= 0.005 * A.plan_cost(trip, plan), tv
 
 
 def test_regeneration_helps_a_downhill_track_needs_no_stop_where_the_flat_one_does():
@@ -331,39 +332,61 @@ def test_regeneration_is_lost_above_the_capacity(flat_curve):
     assert plan.feasible and plan.soc_end == pytest.approx(10.0) and plan.trace[1][1] == pytest.approx(10.0)
 
 
+def test_regeneration_above_the_capacity_is_not_credited_in_the_cost(flat_curve):
+    # Gefälle 10 % bei 1000 kg: −0,28123 kWh je Zelle bei 50 km/h (0,1 h je Zelle). Volle Batterie: nichts passt hinein, es wird nichts entnommen und nichts gutgeschrieben.
+    full = mini_trip(2, grade=-0.1, aux=6.0, mass=1000.0, soc0=10.0, w_time=20.0, w_energy=1.0)
+    plan = A.solve(full, [50])
+    assert plan.used_kwh == pytest.approx(0.0, abs=1e-12) and plan.value == pytest.approx(20.0 * 0.2, abs=1e-9) and A.plan_cost(full, plan) == pytest.approx(4.0, abs=1e-9)
+    # 0,1 kWh Platz: die erste Zelle nimmt nur 0,1 auf (Gutschrift 0,1 · 1 €/kWh), die zweite nichts mehr
+    part = mini_trip(2, grade=-0.1, aux=6.0, mass=1000.0, soc0=9.9, w_time=20.0, w_energy=1.0)
+    plan = A.solve(part, [50])
+    assert plan.used_kwh == pytest.approx(-0.1) and plan.value == pytest.approx(4.0 - 0.1, abs=1e-6) and A.plan_cost(part, plan) == pytest.approx(3.9, abs=1e-6)
+    assert A.check_plan(part, plan)["used_kwh"] == pytest.approx(-0.1) and A.check_plan(part, plan)["cost"] == pytest.approx(3.9, abs=1e-6)
+
+
+def test_weights_scale_the_value_and_move_the_optimum_between_time_and_energy(flat_curve):
+    # nur aux: je Zelle 6,3 · 5 / v kWh und 5 / v h. Zeit allein: schnell; Energie allein (kleiner Zeitwert): ebenfalls schnell, weil aux · dx / v mit v fällt;
+    # mit Roll- und Luftwiderstand gibt es dazwischen einen Zielkonflikt: hier ein Fahrzeug mit Luftwiderstand, ebene Strecke, ohne Laden
+    kw = dict(cap=80.0, soc0=80.0, smin_stop=0.0, smin_dest=0.0, aux=0.8, mass=2000.0, cda=0.62, cr=0.01)
+    speeds = [60, 80, 100, 120, 140]
+    fast = A.solve(mini_trip(10, w_time=1.0, w_energy=0.0, **kw), speeds)
+    cheap = A.solve(mini_trip(10, w_time=1.0, w_energy=100.0, **kw), speeds)
+    mid = A.solve(mini_trip(10, w_time=20.0, w_energy=0.55, **kw), speeds)
+    assert fast.v.tolist() == [140.0] * 10 and cheap.v.tolist() == [60.0] * 10 and 60.0 < mid.v.mean() < 140.0
+    assert fast.time_h < mid.time_h < cheap.time_h and fast.used_kwh > mid.used_kwh > cheap.used_kwh
+    # Skalierung: doppelte Gewichte, doppelter Wert, gleicher Plan
+    twice = A.solve(mini_trip(10, w_time=40.0, w_energy=1.1, **kw), speeds)
+    assert twice.v.tolist() == mid.v.tolist() and twice.value == pytest.approx(2 * mid.value, rel=1e-9)
+
+
 def _base(**kw):
-    return S.make_trip({**C.BASE_SCENARIO, "length": 450, **kw})
+    """Fahrt über 450 km mit der reinen Reisezeit als Zielfunktion („Zeit allein“), wenn kein Zeitwert genannt ist."""
+    return S.make_trip({**C.BASE_SCENARIO, "length": 450, "tv": C.TV_FAST, **kw})
 
 
 @pytest.mark.parametrize("key,values", [("peak", [30.0, 50.0, 100.0, 150.0, 250.0])])
 def test_more_charging_power_is_never_slower(key, values):
-    times = [A.solve(_base(**{key: v}), S.speed_grid(130)).value_h for v in values]
+    times = [A.solve(_base(**{key: v}), S.speed_grid(130)).value for v in values]
     assert all(b <= a * 1.003 for a, b in zip(times, times[1:]))
     assert times[0] > times[-1] * 1.01                                 # der Einfluss ist hier tatsächlich sichtbar
 
 
 def test_more_fixed_time_per_stop_is_never_faster():
-    times = [A.solve(_base(stop_min=m, peak=50.0), S.speed_grid(130)).value_h for m in (1.0, 5.0, 15.0, 30.0)]
+    times = [A.solve(_base(stop_min=m, peak=50.0), S.speed_grid(130)).value for m in (1.0, 5.0, 15.0, 30.0)]
     assert all(b >= a * (1 - 0.003) for a, b in zip(times, times[1:]))
     assert times[-1] > times[0] * 1.02
 
 
 def test_stronger_headwind_is_never_faster():
-    times = [A.solve(_base(headwind=w, vmax=130), S.speed_grid(130)).value_h for w in (-20, 0, 15, 30, 40)]
-    assert all(b >= a * (1 - 0.003) for a, b in zip(times, times[1:]))
-    assert times[-1] > times[0] * 1.02
-
-
-def test_colder_weather_is_never_faster():
-    times = [A.solve(_base(temp=t), S.speed_grid(130)).value_h for t in (30, 20, 5, -10, -25)]
+    times = [A.solve(_base(headwind=w, vmax=130), S.speed_grid(130)).value for w in (-20, 0, 15, 30, 40)]
     assert all(b >= a * (1 - 0.003) for a, b in zip(times, times[1:]))
     assert times[-1] > times[0] * 1.02
 
 
 def test_more_speed_choices_are_never_slower_for_the_same_trip():
     trip = _base(vmax=130, stop_min=10.0, peak=50.0)
-    few = A.solve(trip, [130]).value_h
-    more = A.solve(trip, S.speed_grid(130)).value_h
+    few = A.solve(trip, [130]).value
+    more = A.solve(trip, S.speed_grid(130)).value
     assert more <= few * 1.001
 
 

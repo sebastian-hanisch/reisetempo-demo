@@ -39,17 +39,19 @@ SETTING_SPECS = {
     "wind_slider": SettingSpec("wind", int, B["headwind"], None, C.WIND_MIN, C.WIND_MAX, C.WIND_STEP),
     "windmode_select": SettingSpec("wmode", str, B["wind_mode"], C.WIND_MODES),
     "seed_input": SettingSpec("seed", int, B["seed"], None, C.SEED_MIN, C.SEED_MAX, 1),
-    "temp_slider": SettingSpec("temp", int, B["temp"], None, C.TEMP_MIN, C.TEMP_MAX, C.TEMP_STEP),
+    "tv_select": SettingSpec("tv", int, B["tv"], C.TV_OPTIONS),
+    "price_slider": SettingSpec("price", float, B["price"], None, C.PRICE_MIN, C.PRICE_MAX, C.PRICE_STEP),
     "soc0_slider": SettingSpec("soc0", int, B["soc0"], None, C.SOC0_MIN, C.SOC0_MAX, C.SOC0_STEP),
     "sminstop_slider": SettingSpec("smins", int, B["smin_stop"], None, C.SMIN_STOP_MIN, C.SMIN_STOP_MAX, 1),
     "smindest_slider": SettingSpec("smind", int, B["smin_dest"], None, C.SMIN_DEST_MIN, C.SMIN_DEST_MAX, 1),
     "vmax_slider": SettingSpec("vmax", int, B["vmax"], None, C.VMAX_MIN, C.VMAX_MAX, C.VMAX_STEP),
     "view_select": SettingSpec("view", str, C.DEFAULT_VIEW, C.VIEW_OPTIONS),
+    "sweeptv_select": SettingSpec("stv", int, C.DEFAULT_TV, (C.DEFAULT_TV, C.TV_FAST)),
 }
-# Szenario-Schlüssel -> Widget-Schlüssel (view_select ist reine Anzeigewahl und gehört nicht zum Szenario)
+# Szenario-Schlüssel -> Widget-Schlüssel (view_select und sweeptv_select sind reine Anzeigewahl und gehören nicht zum Szenario)
 PRESET_KEYS = {"vehicle": "vehicle_select", "cap": "cap_slider", "mass": "mass_slider", "cda": "cda_slider", "cr": "cr_slider", "peak": "peak_slider", "aux": "aux_slider", "curve": "curve_select",
                "loss": "loss_slider", "stop_min": "stop_slider", "length": "length_slider", "profile": "profile_select", "rise": "rise_slider", "seed": "seed_input", "headwind": "wind_slider",
-               "wind_mode": "windmode_select", "temp": "temp_slider", "soc0": "soc0_slider", "smin_stop": "sminstop_slider", "smin_dest": "smindest_slider", "vmax": "vmax_slider"}
+               "wind_mode": "windmode_select", "tv": "tv_select", "price": "price_slider", "soc0": "soc0_slider", "smin_stop": "sminstop_slider", "smin_dest": "smindest_slider", "vmax": "vmax_slider"}
 VEHICLE_KEYS = ("cap", "mass", "cda", "cr", "peak", "aux", "curve", "vmax")
 
 
@@ -74,7 +76,7 @@ def bounds(state_key):
 
 def _coerce(spec: SettingSpec, raw):
     value = spec.caster(raw)
-    if spec.caster is str:
+    if spec.options is not None:
         return value if value in spec.options else None
     value = snap(value, spec.lo, spec.hi, spec.step)
     return spec.caster(value) if spec.caster is int else value
@@ -124,9 +126,9 @@ def randomize_seed():
 def settings_from_state(values: dict) -> dict:
     """Szenario-Wörterbuch (Schlüssel C.SCENARIO_KEYS) aus den Widget-Werten."""
     out = {key: values[state_key] for key, state_key in PRESET_KEYS.items()}
-    for key in ("cap", "mass", "cda", "cr", "peak", "aux", "loss", "stop_min"):
+    for key in ("cap", "mass", "cda", "cr", "peak", "aux", "loss", "stop_min", "price"):
         out[key] = float(out[key])
-    for key in ("length", "rise", "seed", "headwind", "temp", "soc0", "smin_stop", "smin_dest", "vmax"):
+    for key in ("length", "rise", "seed", "headwind", "tv", "soc0", "smin_stop", "smin_dest", "vmax"):
         out[key] = int(out[key])
     out["curve"], out["profile"], out["wind_mode"], out["vehicle"] = str(out["curve"]), str(out["profile"]), str(out["wind_mode"]), str(out["vehicle"])
     return out

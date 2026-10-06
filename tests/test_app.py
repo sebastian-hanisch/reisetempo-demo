@@ -1,6 +1,6 @@
 """End-to-end-Rauchtest über Streamlits AppTest: lädt app.py mit den Standardeinstellungen, klickt jeden Button, fährt jeden Regler an seine Grenzen, wählt jede Option jeder Auswahl und prüft,
 dass kein Python-Fehler auftritt (insbesondere `StreamlitDuplicateElementId` bei Diagrammen mit gleichem Inhalt und `StreamlitAPIException` bei Reglern mit berechneten Grenzen).
-Dazu: Presets setzen alle Widgets, Fahrzeugwahl setzt die Fahrzeugparameter, Permalink-Rundlauf, nicht erreichbares Ziel zeigt eine Warnung statt eines Fehlers."""
+Dazu: Presets setzen alle Widgets, Fahrzeugwahl setzt die Fahrzeugparameter, der Zeitwert wählt den Punkt der Spanne, Permalink-Rundlauf, nicht erreichbares Ziel zeigt eine Warnung statt eines Fehlers."""
 import os
 
 import pytest
@@ -76,11 +76,34 @@ def test_every_select_slider_option_does_not_raise(key, options):
         assert not at.exception, (key, option, [str(e) for e in at.exception])
 
 
-def test_every_view_option_does_not_raise():
-    for option in C.VIEW_OPTIONS:
+@pytest.mark.parametrize("key,options", [("view_select", C.VIEW_OPTIONS), ("sweeptv_select", (C.DEFAULT_TV, C.TV_FAST))])
+def test_every_radio_option_does_not_raise(key, options):
+    for option in options:
         at = _fresh_app()
-        at.radio(key="view_select").set_value(option).run(timeout=TIMEOUT)
-        assert not at.exception, (option, [str(e) for e in at.exception])
+        at.radio(key=key).set_value(option).run(timeout=TIMEOUT)
+        assert not at.exception, (key, option, [str(e) for e in at.exception])
+
+
+def test_every_time_value_does_not_raise_and_changes_the_metrics():
+    shown = {}
+    for tv in C.TV_OPTIONS:
+        at = _fresh_app()
+        at.select_slider(key="tv_select").set_value(tv).run(timeout=TIMEOUT)
+        assert not at.exception, (tv, [str(e) for e in at.exception])
+        shown[tv] = {m.label: m.value for m in at.metric}[C.METHOD_LABELS["opt"]]
+    assert shown[C.TV_FAST].endswith("min") and all(v.endswith("€") for tv, v in shown.items() if tv != C.TV_FAST)          # Zeit allein: Reisezeit, sonst Kosten in Euro
+    assert len(set(shown.values())) == len(C.TV_OPTIONS)
+
+
+def test_the_time_value_drives_the_optimum_from_economical_to_fast():
+    speeds = {}
+    for tv in (min(C.TV_OPTIONS), C.DEFAULT_TV, C.TV_FAST):
+        at = _fresh_app()
+        at.select_slider(key="tv_select").set_value(tv).run(timeout=TIMEOUT)
+        assert not at.exception
+        table = next(df for df in at.dataframe if "Verfahren" in df.value.columns and "Ø km/h" in df.value.columns).value
+        speeds[tv] = float(table.loc[table["Verfahren"] == C.METHOD_LABELS["opt"], "Ø km/h"].iloc[0])
+    assert speeds[min(C.TV_OPTIONS)] < 65.0 < speeds[C.DEFAULT_TV] < speeds[C.TV_FAST] and speeds[C.TV_FAST] > 125.0
 
 
 def test_vehicle_selection_applies_the_vehicle_parameters():
@@ -102,13 +125,25 @@ def test_permalink_roundtrip_snaps_and_clips_values():
     at.query_params["prof"] = "pass"
     at.query_params["wmode"] = "unsinn"   # ungültige Option: Standard bleibt
     at.query_params["cda"] = "abc"        # nicht lesbar: Standard bleibt
+    at.query_params["tv"] = "7"           # gibt es nicht als Zeitwert: Standard bleibt
     at.run(timeout=TIMEOUT)
     assert not at.exception, [str(e) for e in at.exception]
     assert at.session_state["length_slider"] == 700
     assert at.session_state["peak_slider"] == C.PEAK_MAX
     assert at.session_state["profile_select"] == "pass"
     assert at.session_state["windmode_select"] == C.DEFAULT_WIND_MODE
-    assert at.session_state["cda_slider"] == C.BASE_SCENARIO["cda"]
+    assert at.session_state["cda_slider"] == C.BASE_SCENARIO["cda"] and at.session_state["tv_select"] == C.DEFAULT_TV
+
+
+def test_permalink_roundtrip_restores_the_time_value_and_the_price():
+    at = AppTest.from_file(APP_PATH, default_timeout=TIMEOUT)
+    at.query_params["tv"] = "5"
+    at.query_params["price"] = "0.75"
+    at.run(timeout=TIMEOUT)
+    assert not at.exception, [str(e) for e in at.exception]
+    assert at.session_state["tv_select"] == 5 and at.session_state["price_slider"] == pytest.approx(0.75)
+    qp = at.query_params
+    assert str(qp["tv"]) in ("5", "['5']") and "0.75" in str(qp["price"])
 
 
 def test_unreachable_trip_shows_a_warning_and_no_exception():
@@ -117,6 +152,5 @@ def test_unreachable_trip_shows_a_warning_and_no_exception():
     at.slider(key="soc0_slider").set_value(C.SOC0_MIN)
     at.slider(key="smindest_slider").set_value(C.SMIN_DEST_MAX)
     at.slider(key="length_slider").set_value(C.LENGTH_MAX)
-    at.slider(key="temp_slider").set_value(C.TEMP_MIN)
     at.run(timeout=TIMEOUT)
     assert not at.exception, [str(e) for e in at.exception]

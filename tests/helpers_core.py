@@ -2,7 +2,7 @@
 und ein Zwischenspeicher für die vollen Läufe der Szenarien (ein Lauf je Szenario für alle Testdateien).
 
 Die Mini-Fahrt `mini_trip` ist so gebaut, dass sich die Erwartungen im Kopf rechnen lassen: Ohne Rollwiderstand und Luftwiderstand (cr = cda = 0) verbraucht eine ebene Zelle nur die
-Nebenverbraucher (aux · dx / v, bei 20 °C ohne Kältefaktor). Mit aux = 6,3 kW und v = 50 km/h sind das 6,3 · 5 / 50 = 0,63 kWh je Zelle."""
+Nebenverbraucher (aux · dx / v). Mit aux = 6,3 kW und v = 50 km/h sind das 6,3 · 5 / 50 = 0,63 kWh je Zelle."""
 from __future__ import annotations
 
 import functools
@@ -25,14 +25,14 @@ def flat_curve(monkeypatch):
 
 
 def mini_trip(n, grade=0.0, wind=0.0, cap=10.0, soc0=10.0, smin_stop=1.0, smin_dest=1.0, aux=6.3, peak=60.0, stop_h=0.1, mass=1000.0, cda=0.0, cr=0.0,
-              temp=20.0, loss=0.0, curve=FLAT_CURVE, vmax=50):
-    """Fahrt mit n Zellen zu je 5 km; Ladestände in kWh; grade und wind als Zahl (alle Zellen gleich) oder als Liste je Zelle."""
+              loss=0.0, curve=FLAT_CURVE, vmax=50, w_time=1.0, w_energy=0.0):
+    """Fahrt mit n Zellen zu je 5 km; Ladestände in kWh; grade und wind als Zahl (alle Zellen gleich) oder als Liste je Zelle. Zielfunktion: reine Reisezeit (w_time = 1, w_energy = 0), wenn nichts anderes steht."""
     veh = S.Vehicle(cap, mass, cda, cr, peak, aux, curve)
     g = np.full(n, float(grade)) if np.isscalar(grade) else np.asarray(grade, dtype=float)
     w = np.full(n, float(wind)) if np.isscalar(wind) else np.asarray(wind, dtype=float)
     height = np.concatenate([[0.0], np.cumsum(g * C.DX_KM * 1000.0)])
     route = S.Route(n * C.DX_KM, g, w, height, "flach", 0)
-    return S.Trip(veh, route, float(temp), float(soc0), float(smin_stop), float(smin_dest), int(vmax), float(loss), float(stop_h))
+    return S.Trip(veh, route, float(soc0), float(smin_stop), float(smin_dest), int(vmax), float(loss), float(stop_h), float(w_time), float(w_energy))
 
 
 @functools.lru_cache(maxsize=None)

@@ -170,6 +170,25 @@ def test_rule_plan_uses_the_given_speed_for_time_and_energy(flat_curve):
     # bei 100 km/h: 6,3 · 0,05 = 0,315 kWh je Zelle, 0,05 h je Zelle; 10 Zellen: 3,15 kWh, 0,5 h
     plan = ST.rule_plan(mini_trip(10), 100.0)
     assert plan.v.tolist() == [100.0] * 10 and plan.energy.tolist() == pytest.approx([0.315] * 10) and plan.time_h == pytest.approx(0.5) and plan.soc_end == pytest.approx(10 - 3.15)
+    assert plan.used_kwh == pytest.approx(3.15)
+
+
+def test_rule_plan_counts_the_energy_taken_from_the_battery_including_stops(flat_curve):
+    # 40 Zellen bei 50 km/h: 0,63 kWh je Zelle, 25,2 kWh; die entnommene Energie ist unabhängig von den Stopps (Energieerhaltung: Start + geladen − Ende)
+    trip = mini_trip(40)
+    plan = ST.rule_plan(trip, 50.0)
+    assert plan.feasible and plan.stops and plan.used_kwh == pytest.approx(25.2)
+    assert plan.used_kwh == pytest.approx(trip.soc0 + plan.charged_kwh - plan.soc_end)
+
+
+def test_rule_plan_loses_regeneration_above_the_capacity_in_the_energy_count(flat_curve):
+    # Gefälle 10 % bei 1000 kg: −0,28123 kWh je Zelle; Start voll (10 kWh): die Rekuperation passt nicht in die Batterie, es wird nichts entnommen
+    trip = mini_trip(2, grade=-0.1, aux=6.0, mass=1000.0, soc0=10.0)
+    plan = ST.rule_plan(trip, 50.0)
+    assert plan.feasible and plan.used_kwh == pytest.approx(0.0, abs=1e-12) and plan.soc_end == pytest.approx(10.0)
+    start_low = mini_trip(2, grade=-0.1, aux=6.0, mass=1000.0, soc0=9.9)                    # 0,1 kWh Platz: die erste Zelle nimmt 0,28123 auf, 0,1 passt hinein
+    p2 = ST.rule_plan(start_low, 50.0)
+    assert p2.used_kwh == pytest.approx(-0.1) and p2.soc_end == pytest.approx(10.0)
 
 
 # ------------------------------------------------------------------ run_all
@@ -184,24 +203,51 @@ def test_run_all_returns_the_four_plans_in_the_documented_order(name):
 
 
 @pytest.mark.parametrize("name", C.PRESET_ORDER)
-def test_optimum_is_not_slower_than_the_best_constant_which_is_not_slower_than_the_speed_limit(name):
-    _, plans = preset_run(name)
-    opt, best, top = plans["opt"].time_h, plans["const_best"].time_h, plans["const_max"].time_h
+def test_optimum_is_not_costlier_than_the_best_constant_which_is_not_costlier_than_the_speed_limit(name):
+    trip, plans = preset_run(name)
+    opt, best, top = (A.plan_cost(trip, plans[k]) for k in ("opt", "const_best", "const_max"))
     assert opt <= best * 1.003 and best <= top * 1.003
 
 
 @pytest.mark.parametrize("name", C.PRESET_ORDER)
-def test_the_practice_rule_is_never_faster_than_the_optimum_apart_from_rounding(name):
-    _, plans = preset_run(name)
-    assert plans["rule"].time_h >= plans["opt"].time_h * (1 - 0.003)
+def test_the_practice_rule_is_never_cheaper_than_the_optimum_apart_from_rounding(name):
+    trip, plans = preset_run(name)
+    assert A.plan_cost(trip, plans["rule"]) >= A.plan_cost(trip, plans["opt"]) * (1 - 0.003)
 
 
 def test_the_practice_rule_loses_clearly_with_a_slow_charger_and_headwind():
-    for name in ("Langsamer Lader", "Gegenwind"):
+    for name in ("Langsamer Lader", "Gegenwind"):                                # Zeit allein: Reisezeit
         _, plans = preset_run(name)
         assert plans["rule"].time_h > 1.10 * plans["opt"].time_h                 # gemessen: rund 20 bis 25 %
     _, plans = preset_run("Elektro-Lkw")
     assert plans["rule"].time_h > plans["opt"].time_h                            # gemessen: rund 4 %
+    trip, plans = preset_run("Ohne Tempolimit")                                  # 20 €/h: die Regel zahlt mit Energie
+    assert A.plan_cost(trip, plans["rule"]) > 1.15 * A.plan_cost(trip, plans["opt"]) and plans["rule"].used_kwh > 1.5 * plans["opt"].used_kwh
+
+
+def test_the_practice_rule_does_not_depend_on_the_time_value_and_the_other_methods_do():
+    base = {**C.BASE_SCENARIO, "length": 300}
+    plans = {tv: ST.run_all(S.make_trip({**base, "tv": tv})) for tv in (1, 10, C.TV_FAST)}
+    for tv in (1, 10):
+        a, b = plans[tv]["rule"], plans[C.TV_FAST]["rule"]
+        assert a.v.tolist() == b.v.tolist() and a.time_h == b.time_h and a.used_kwh == b.used_kwh and [(s.km, s.soc_to) for s in a.stops] == [(s.km, s.soc_to) for s in b.stops]
+    assert plans[1]["opt"].mean_speed < plans[10]["opt"].mean_speed < plans[C.TV_FAST]["opt"].mean_speed
+    assert plans[1]["const_best"].mean_speed < plans[10]["const_best"].mean_speed < plans[C.TV_FAST]["const_best"].mean_speed
+
+
+def test_the_optimum_trades_time_for_energy_along_the_time_values():
+    base = {**C.BASE_SCENARIO, "length": 300}
+    runs = [ST.run_all(S.make_trip({**base, "tv": tv}))["opt"] for tv in C.TV_OPTIONS]
+    times, used = [p.time_h for p in runs], [p.used_kwh for p in runs]
+    assert all(b <= a + 1e-9 for a, b in zip(times, times[1:])) and all(b >= a - 1e-9 for a, b in zip(used, used[1:]))        # mehr Zeitwert: schneller und mehr Energie
+    assert times[0] > 1.5 * times[-1] and used[0] < 0.6 * used[-1]
+
+
+def test_the_extremes_of_the_spectrum_are_the_minimum_speed_and_the_speed_limit():
+    base = {**C.BASE_SCENARIO, "length": 300}
+    eco = ST.run_all(S.make_trip({**base, "tv": min(C.TV_OPTIONS)}))["opt"]
+    fast = ST.run_all(S.make_trip({**base, "tv": C.TV_FAST}))["opt"]
+    assert eco.v.min() == C.V_MIN and eco.mean_speed < C.V_MIN + 5 and fast.v.max() == 130.0 and fast.mean_speed > 125.0
 
 
 def test_run_all_with_a_tiny_battery_reports_unreachable_plans_with_notes():

@@ -1,22 +1,19 @@
 """Feste Annahmen, Regler-Grenzen, Fahrzeug-Presets und Farben der Demo „Reisegeschwindigkeit“ (eine Wahrheitsquelle).
 
-Alle Fahrzeugwerte und Ladekurven sind stilisierte Annahmen in der Größenordnung heutiger Fahrzeuge, keine Herstellerangaben."""
+Alle Fahrzeugwerte und Ladekurven sind stilisierte Annahmen in der Größenordnung heutiger Fahrzeuge, keine Herstellerangaben. Die Außentemperatur ist konstant und mild angenommen
+(kein Kälteeffekt auf Verbrauch und Ladung); den Temperatureinfluss untersucht die Ladestrategie-Demo."""
 
 # ------------------------------------------------------------------ Physik (feste Annahmen)
 RHO = 1.2                    # Luftdichte (kg/m³)
 G_ACC = 9.81                 # Erdbeschleunigung (m/s²)
 ETA_DRIVE = 0.90             # Wirkungsgrad Batterie bis Rad beim Antreiben
 ETA_REGEN = 0.65             # Anteil der Hangabtriebs- und Bremsarbeit, der bei Rekuperation in die Batterie zurückfließt
-T_REF = 20.0                 # Referenztemperatur (°C): darüber kein Kälteeffekt
-COLD_PER_K = 0.356 / 26.6    # Mehrverbrauch je Kelvin unter T_REF (AAA-Wintertest 2025: +35,6 % bei −6,6 °C, linear angesetzt)
-CHARGE_LOSS_COLD_PER_K = 0.15 / 40.0   # zusätzlicher Ladeverlust je Kelvin unter T_REF (15 Punkte bei −20 °C)
-ETA_CHARGE_FLOOR = 0.60      # unterer Anschlag des Ladewirkungsgrads
 
 # ------------------------------------------------------------------ Rechenraster (Live und Messreihe identisch)
 DX_KM = 5.0                  # Zellenlänge der Strecke (km): Steigung, Wind und Geschwindigkeit gelten je Zelle
 N_SOC = 500                  # Ladestandsraster: mindestens N_SOC Stufen ...
 DS_MAX = 0.25                # ... und höchstens DS_MAX kWh je Stufe (große Akkus bekommen mehr Stufen; sonst weichen DP-Wert und Nachfahrt auseinander)
-V_MIN = 40                   # kleinste wählbare Reisegeschwindigkeit (km/h)
+V_MIN = 60                   # kleinste wählbare Reisegeschwindigkeit (km/h): Mindestgeschwindigkeit auf der Autobahn
 V_STEP = 5                   # Geschwindigkeitsraster (km/h)
 SOC_EPS = 1e-9
 
@@ -57,14 +54,25 @@ CDA_MIN, CDA_MAX, CDA_STEP = 0.40, 8.00, 0.01
 CR_MIN, CR_MAX, CR_STEP = 0.004, 0.015, 0.0005
 PEAK_MIN, PEAK_MAX, PEAK_STEP = 30.0, 800.0, 10.0
 AUX_MIN, AUX_MAX, AUX_STEP = 0.3, 10.0, 0.1
-LOSS_MIN, LOSS_MAX, LOSS_STEP = 0.0, 30.0, 1.0       # Ladeverlust bei Referenztemperatur (Prozent)
+LOSS_MIN, LOSS_MAX, LOSS_STEP = 0.0, 30.0, 1.0       # Ladeverlust (Prozent der Netzenergie)
 DEFAULT_LOSS = 10.0
 STOP_MIN, STOP_MAX, STOP_STEP = 1.0, 30.0, 1.0        # Fixzeit je Ladestopp (Minuten); ohne Fixzeit gäbe es beliebig viele Mikro-Stopps
 DEFAULT_STOP = 5.0
 
+# ------------------------------------------------------------------ Regler: Zielfunktion (Spanne zwischen „möglichst sparsam“ und „möglichst schnell“)
+# Kosten = Zeitwert · Reisezeit + Strompreis / Ladewirkungsgrad · Energie, die die Fahrt der Batterie entnimmt. Der Zeitwert wählt den Punkt der Spanne; TV_FAST heißt „Zeit allein“.
+PRICE_MIN, PRICE_MAX, PRICE_STEP, DEFAULT_PRICE = 0.20, 1.00, 0.05, 0.50    # Strompreis (€/kWh), stilisiert
+TV_FAST = 1000                                                        # Sonderwert „Zeit allein“: die Energie kostet nichts, es zählt nur die Reisezeit
+TV_OPTIONS = (1, 2, 5, 10, 20, 30, 50, 100, TV_FAST)                  # wählbare Zeitwerte (€ je Stunde); der kleinste ist praktisch „nur Energie“
+DEFAULT_TV = 20
+
+
+def tv_label(tv: int) -> str:
+    return "∞ (Zeit allein)" if tv >= TV_FAST else f"{tv} €/h"
+
+
 # ------------------------------------------------------------------ Regler: Fahrt
 LENGTH_MIN, LENGTH_MAX, LENGTH_STEP, DEFAULT_LENGTH = 100, 1500, 50, 600
-TEMP_MIN, TEMP_MAX, TEMP_STEP, DEFAULT_TEMP = -25, 40, 5, 20
 SOC0_MIN, SOC0_MAX, SOC0_STEP, DEFAULT_SOC0 = 10, 100, 5, 100
 SMIN_STOP_MIN, SMIN_STOP_MAX, DEFAULT_SMIN_STOP = 0, 30, 10     # Mindestladestand bei Ankunft an einem Ladestopp (Prozent)
 SMIN_DEST_MIN, SMIN_DEST_MAX, DEFAULT_SMIN_DEST = 0, 30, 10     # Mindestladestand am Ziel (Prozent)
@@ -98,8 +106,8 @@ COLOR_UP, COLOR_DOWN = "#c77700", "#2a6fb0"
 RESULTS_FILE = "data/rtp_results.json"
 
 # ------------------------------------------------------------------ Szenarien (Seeds liegen außerhalb der Messreihen-Seeds)
-PRESET_ORDER = ["Standard", "Langsamer Lader", "Kälte", "Gegenwind", "Alpenpass", "Ohne Tempolimit", "Elektro-Lkw"]
-SCENARIO_KEYS = ("vehicle", "cap", "mass", "cda", "cr", "peak", "aux", "curve", "loss", "stop_min", "length", "profile", "rise", "seed", "headwind", "wind_mode", "temp", "soc0", "smin_stop", "smin_dest", "vmax")
+PRESET_ORDER = ["Standard", "Möglichst schnell", "Möglichst sparsam", "Langsamer Lader", "Gegenwind", "Alpenpass", "Ohne Tempolimit", "Elektro-Lkw"]
+SCENARIO_KEYS = ("vehicle", "cap", "mass", "cda", "cr", "peak", "aux", "curve", "loss", "stop_min", "length", "profile", "rise", "seed", "headwind", "wind_mode", "tv", "price", "soc0", "smin_stop", "smin_dest", "vmax")
 
 
 def vehicle_scenario(name: str) -> dict:
@@ -108,25 +116,27 @@ def vehicle_scenario(name: str) -> dict:
 
 
 BASE_SCENARIO = {**vehicle_scenario(DEFAULT_VEHICLE), "loss": DEFAULT_LOSS, "stop_min": DEFAULT_STOP, "length": DEFAULT_LENGTH, "profile": DEFAULT_PROFILE, "rise": DEFAULT_RISE, "seed": DEFAULT_SEED,
-                 "headwind": DEFAULT_WIND, "wind_mode": DEFAULT_WIND_MODE, "temp": DEFAULT_TEMP, "soc0": DEFAULT_SOC0, "smin_stop": DEFAULT_SMIN_STOP, "smin_dest": DEFAULT_SMIN_DEST}
+                 "headwind": DEFAULT_WIND, "wind_mode": DEFAULT_WIND_MODE, "tv": DEFAULT_TV, "price": DEFAULT_PRICE, "soc0": DEFAULT_SOC0, "smin_stop": DEFAULT_SMIN_STOP, "smin_dest": DEFAULT_SMIN_DEST}
 
 PRESETS = {
     "Standard": dict(BASE_SCENARIO),
-    "Langsamer Lader": {**BASE_SCENARIO, "peak": 50.0, "vmax": 160},
-    "Kälte": {**BASE_SCENARIO, "temp": -10},
-    "Gegenwind": {**BASE_SCENARIO, "peak": 50.0, "headwind": 25, "vmax": 160},
-    "Alpenpass": {**BASE_SCENARIO, "profile": "pass"},
+    "Möglichst schnell": {**BASE_SCENARIO, "tv": TV_FAST},
+    "Möglichst sparsam": {**BASE_SCENARIO, "tv": 1},
+    "Langsamer Lader": {**BASE_SCENARIO, "peak": 50.0, "vmax": 160, "tv": TV_FAST},
+    "Gegenwind": {**BASE_SCENARIO, "peak": 50.0, "headwind": 25, "vmax": 160, "tv": TV_FAST},
+    "Alpenpass": {**BASE_SCENARIO, "profile": "pass", "tv": TV_FAST},
     "Ohne Tempolimit": {**BASE_SCENARIO, "vmax": 180},
-    "Elektro-Lkw": {**BASE_SCENARIO, **vehicle_scenario("Elektro-Lkw"), "length": 1000},
+    "Elektro-Lkw": {**BASE_SCENARIO, **vehicle_scenario("Elektro-Lkw"), "length": 1000, "tv": TV_FAST},
 }
 PRESET_HELP = {
-    "Standard": "Pkw mit 150 kW, 600 km, 20 °C, hügelige Strecke: Die Praxisregel (Tempolimit, immer bis 80 % laden) verschenkt Zeit beim Laden.",
-    "Langsamer Lader": "Mit nur 50 kW lohnt es sich, deutlich unter dem Tempolimit von 160 km/h zu fahren: Jede Minute am Lader ist teuer.",
-    "Kälte": "Bei −10 °C steigt der Verbrauch und der Ladewirkungsgrad sinkt: mehr Stopps, deutlich längere Reisezeit.",
-    "Gegenwind": "Gegenwind verschiebt die beste Geschwindigkeit nach unten: Der Luftwiderstand wächst mit dem Quadrat der Relativgeschwindigkeit.",
-    "Alpenpass": "Anstieg und Abstieg über einen Pass: Die Steigung kostet Energie, ändert aber die beste Geschwindigkeit kaum.",
-    "Ohne Tempolimit": "Bis 180 km/h erlaubt: Wie schnell sollte man mit 150 kW überhaupt fahren?",
-    "Elektro-Lkw": "600 kWh, 24 t, Tempolimit 90 und 1000 km: Die Geschwindigkeit ist nie die Frage, aber das Ladefenster zählt auch hier.",
+    "Standard": "Pkw mit 150 kW, 600 km, hügelige Strecke, eine Stunde Reisezeit ist 20 € wert: Das Optimum fährt deutlich langsamer als das Tempolimit; die Praxisregel (Tempolimit, immer bis 80 % laden) ist schneller, kostet aber mehr.",
+    "Möglichst schnell": "Zeit allein zählt, Energie kostet nichts: Das Optimum fährt das Tempolimit und lädt nur kurz; die Praxisregel verschenkt Zeit beim Laden.",
+    "Möglichst sparsam": "Zeit ist fast nichts wert (1 € je Stunde): Das Optimum fährt mit der Mindestgeschwindigkeit, braucht gut die Hälfte der Energie und fast die doppelte Reisezeit.",
+    "Langsamer Lader": "Mit nur 50 kW lohnt es sich, bei Zeit allein deutlich unter dem Tempolimit von 160 km/h zu fahren: Jede Minute am Lader ist teuer.",
+    "Gegenwind": "Gegenwind verschiebt die beste Geschwindigkeit nach unten (Zeit allein): Der Luftwiderstand wächst mit dem Quadrat der Relativgeschwindigkeit.",
+    "Alpenpass": "Anstieg und Abstieg über einen Pass (Zeit allein): Die Steigung kostet Energie, ändert aber die beste Geschwindigkeit kaum.",
+    "Ohne Tempolimit": "Bis 180 km/h erlaubt, eine Stunde ist 20 € wert: Auch ohne Tempolimit fährt das Optimum nur etwa 110 km/h; die Praxisregel mit 180 km/h kostet ein Vielfaches an Energie.",
+    "Elektro-Lkw": "600 kWh, 24 t, Tempolimit 90 und 1000 km (Zeit allein): Die Geschwindigkeit ist nie die Frage, aber das Ladefenster zählt auch hier.",
 }
 
 

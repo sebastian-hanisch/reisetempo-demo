@@ -38,13 +38,14 @@ class Route:
 class Trip:
     vehicle: Vehicle
     route: Route
-    temp: float           # °C
     soc0: float           # Anfangsladestand (kWh)
     smin_stop: float      # Mindestladestand bei Ankunft an einem Ladestopp (kWh)
     smin_dest: float      # Mindestladestand am Ziel (kWh)
     vmax: int             # Tempolimit (km/h)
-    loss: float           # Ladeverlust bei Referenztemperatur (Prozent)
+    loss: float           # Ladeverlust (Prozent)
     stop_h: float         # Fixzeit je Ladestopp (Stunden)
+    w_time: float = 1.0   # Gewicht der Reisezeit in der Zielfunktion (€ je Stunde; 1 mit w_energy = 0: Zielfunktion = Reisezeit in Stunden)
+    w_energy: float = 0.0  # Gewicht der Batterieenergie in der Zielfunktion (€ je kWh, schon durch den Ladewirkungsgrad geteilt)
 
 
 def _pieces(rng, n: int, lo_len: int, hi_len: int, draw) -> np.ndarray:
@@ -111,10 +112,19 @@ def speed_grid(vmax: float) -> list[int]:
     return list(range(C.V_MIN, max(top, C.V_MIN) + 1, C.V_STEP))
 
 
+def objective_weights(tv: int, price: float, loss: float) -> tuple[float, float]:
+    """Gewichte der Zielfunktion (Zeitwert in €/h, Energiepreis in €/kWh Batterieenergie) aus dem Zeitwert-Regler: C.TV_FAST heißt „Zeit allein“ (Energie kostet nichts, die Zielfunktion ist die
+    Reisezeit in Stunden); sonst kostet eine kWh, die die Fahrt der Batterie entnimmt, Strompreis geteilt durch den Ladewirkungsgrad (1 − Ladeverlust)."""
+    if tv >= C.TV_FAST:
+        return 1.0, 0.0
+    return float(tv), price / (1.0 - loss / 100.0)
+
+
 def make_trip(s: dict) -> Trip:
     """Fahrt aus einem Einstellungs-Wörterbuch (Schlüssel siehe C.SCENARIO_KEYS)."""
     veh = Vehicle(cap=float(s["cap"]), mass=float(s["mass"]), cda=float(s["cda"]), cr=float(s["cr"]), peak=float(s["peak"]), aux=float(s["aux"]), curve=str(s["curve"]))
     route = make_route(float(s["length"]), str(s["profile"]), int(s["seed"]), float(s["headwind"]), str(s["wind_mode"]), float(s.get("rise", 0.0)))
     cap = veh.cap
-    return Trip(veh, route, float(s["temp"]), cap * float(s["soc0"]) / 100.0, cap * float(s["smin_stop"]) / 100.0, cap * float(s["smin_dest"]) / 100.0, int(s["vmax"]),
-                float(s["loss"]), float(s["stop_min"]) / 60.0)
+    w_time, w_energy = objective_weights(int(s["tv"]), float(s["price"]), float(s["loss"]))
+    return Trip(veh, route, cap * float(s["soc0"]) / 100.0, cap * float(s["smin_stop"]) / 100.0, cap * float(s["smin_dest"]) / 100.0, int(s["vmax"]),
+                float(s["loss"]), float(s["stop_min"]) / 60.0, w_time, w_energy)

@@ -38,7 +38,7 @@ def test_snap_with_float_steps_is_free_of_rounding_noise():
 
 def test_snap_leaves_grid_values_unchanged():
     for lo, hi, step in ((C.CAP_MIN, C.CAP_MAX, C.CAP_STEP), (C.CDA_MIN, C.CDA_MAX, C.CDA_STEP), (C.CR_MIN, C.CR_MAX, C.CR_STEP), (C.AUX_MIN, C.AUX_MAX, C.AUX_STEP),
-                         (C.LENGTH_MIN, C.LENGTH_MAX, C.LENGTH_STEP), (C.TEMP_MIN, C.TEMP_MAX, C.TEMP_STEP)):
+                         (C.LENGTH_MIN, C.LENGTH_MAX, C.LENGTH_STEP), (C.PRICE_MIN, C.PRICE_MAX, C.PRICE_STEP)):
         for k in range(int(round((hi - lo) / step)) + 1):
             v = round(lo + k * step, 6)
             assert PR.snap(v, lo, hi, step) == v, (lo, step, k)
@@ -47,7 +47,7 @@ def test_snap_leaves_grid_values_unchanged():
 # ------------------------------------------------------------------ Regler-Spezifikationen
 def test_setting_specs_cover_every_scenario_key_and_the_view():
     assert set(PR.PRESET_KEYS) == set(C.SCENARIO_KEYS)
-    assert set(PR.PRESET_KEYS.values()) | {"view_select"} == set(PR.SETTING_SPECS) and len(PR.PRESET_KEYS) == len(set(PR.PRESET_KEYS.values()))
+    assert set(PR.PRESET_KEYS.values()) | {"view_select", "sweeptv_select"} == set(PR.SETTING_SPECS) and len(PR.PRESET_KEYS) == len(set(PR.PRESET_KEYS.values()))
     assert len({s.url_param for s in PR.SETTING_SPECS.values()}) == len(PR.SETTING_SPECS)                    # Adressparameter eindeutig
 
 
@@ -57,6 +57,7 @@ def test_setting_defaults_are_the_base_scenario_inside_their_bounds():
         assert spec.default == C.BASE_SCENARIO[key], key
         check_value(spec, spec.default, key)
     assert PR.SETTING_SPECS["view_select"].default == C.DEFAULT_VIEW and C.DEFAULT_VIEW in PR.SETTING_SPECS["view_select"].options
+    assert PR.SETTING_SPECS["sweeptv_select"].default == C.DEFAULT_TV and set(PR.SETTING_SPECS["sweeptv_select"].options) == {C.DEFAULT_TV, C.TV_FAST}
 
 
 def check_value(spec, value, label):
@@ -73,7 +74,7 @@ def test_bounds_come_from_the_spec():
 
 # ------------------------------------------------------------------ Presets
 def test_every_preset_is_complete_and_inside_the_bounds():
-    assert set(C.PRESET_ORDER) == set(C.PRESETS) == set(C.PRESET_HELP) and len(C.PRESET_ORDER) == 7
+    assert set(C.PRESET_ORDER) == set(C.PRESETS) == set(C.PRESET_HELP) and len(C.PRESET_ORDER) == 8
     for name, p in C.PRESETS.items():
         assert set(p) == set(C.SCENARIO_KEYS), name
         for key, state_key in PR.PRESET_KEYS.items():
@@ -111,10 +112,13 @@ def test_standard_preset_is_the_base_scenario_and_the_others_change_what_they_ar
     std = C.PRESETS["Standard"]
     assert std == C.BASE_SCENARIO and std["vehicle"] == C.DEFAULT_VEHICLE
     changed = {n: sorted(k for k in std if C.PRESETS[n][k] != std[k]) for n in C.PRESET_ORDER if n != "Standard"}
-    assert changed["Langsamer Lader"] == ["peak", "vmax"] and changed["Kälte"] == ["temp"] and changed["Gegenwind"] == ["headwind", "peak", "vmax"] and changed["Alpenpass"] == ["profile"]
+    assert changed["Möglichst schnell"] == ["tv"] and changed["Möglichst sparsam"] == ["tv"]
+    assert changed["Langsamer Lader"] == ["peak", "tv", "vmax"] and changed["Gegenwind"] == ["headwind", "peak", "tv", "vmax"] and changed["Alpenpass"] == ["profile", "tv"]
     assert changed["Ohne Tempolimit"] == ["vmax"]
-    assert set(changed["Elektro-Lkw"]) == {"vehicle", "cap", "mass", "cda", "cr", "peak", "aux", "vmax", "length"}
-    assert C.PRESETS["Langsamer Lader"]["peak"] == 50.0 and C.PRESETS["Kälte"]["temp"] == -10 and C.PRESETS["Gegenwind"]["headwind"] == 25 and C.PRESETS["Alpenpass"]["profile"] == "pass"
+    assert set(changed["Elektro-Lkw"]) == {"vehicle", "cap", "mass", "cda", "cr", "peak", "aux", "vmax", "length", "tv"}
+    assert C.PRESETS["Langsamer Lader"]["peak"] == 50.0 and C.PRESETS["Gegenwind"]["headwind"] == 25 and C.PRESETS["Alpenpass"]["profile"] == "pass"
+    assert std["tv"] == C.DEFAULT_TV and C.PRESETS["Möglichst schnell"]["tv"] == C.TV_FAST and C.PRESETS["Möglichst sparsam"]["tv"] == min(C.TV_OPTIONS)
+    assert [n for n in C.PRESET_ORDER if C.PRESETS[n]["tv"] == C.TV_FAST] == ["Möglichst schnell", "Langsamer Lader", "Gegenwind", "Alpenpass", "Elektro-Lkw"]       # die Geschichten der Zeit-allein-Messreihen
     assert C.PRESETS["Ohne Tempolimit"]["vmax"] == 180 and C.PRESETS["Elektro-Lkw"]["length"] == 1000 and C.PRESETS["Elektro-Lkw"]["vmax"] == 90
 
 
@@ -127,18 +131,19 @@ def test_apply_preset_writes_every_widget_key(fake_st):
 
 
 def test_apply_preset_overwrites_earlier_values(fake_st):
-    PR.apply_preset("Kälte")
+    PR.apply_preset("Möglichst sparsam")
+    assert fake_st.session_state["tv_select"] == 1
     PR.apply_preset("Standard")
-    assert fake_st.session_state["temp_slider"] == 20 and fake_st.session_state["peak_slider"] == 150.0
+    assert fake_st.session_state["tv_select"] == C.DEFAULT_TV and fake_st.session_state["peak_slider"] == 150.0
 
 
 def test_apply_vehicle_sets_only_the_vehicle_parameters(fake_st):
-    fake_st.session_state.update({"vehicle_select": "Elektro-Lkw", "length_slider": 333, "temp_slider": -5, "peak_slider": 1.0})
+    fake_st.session_state.update({"vehicle_select": "Elektro-Lkw", "length_slider": 333, "tv_select": 5, "peak_slider": 1.0})
     PR.apply_vehicle()
     s = fake_st.session_state
     assert (s["cap_slider"], s["mass_slider"], s["cda_slider"], s["cr_slider"], s["peak_slider"], s["aux_slider"], s["curve_select"], s["vmax_slider"]) == (600.0, 24000.0, 5.5, 0.006, 350.0, 5.0, "Standard", 90)
-    assert s["length_slider"] == 333 and s["temp_slider"] == -5 and set(s) == {"vehicle_select", "length_slider", "temp_slider", "peak_slider", "cap_slider", "mass_slider", "cda_slider", "cr_slider",
-                                                                              "aux_slider", "curve_select", "vmax_slider"}
+    assert s["length_slider"] == 333 and s["tv_select"] == 5 and set(s) == {"vehicle_select", "length_slider", "tv_select", "peak_slider", "cap_slider", "mass_slider", "cda_slider", "cr_slider",
+                                                                           "aux_slider", "curve_select", "vmax_slider"}
 
 
 def test_init_session_state_defaults_does_not_overwrite(fake_st):
@@ -164,21 +169,37 @@ def test_settings_from_state_has_the_scenario_keys_and_the_types():
     values.update({"cap_slider": 77, "length_slider": 600.0, "vmax_slider": 130.0, "wind_slider": 15.0, "seed_input": 500.0, "stop_slider": 5, "profile_select": "pass"})
     out = PR.settings_from_state(values)
     assert set(out) == set(C.SCENARIO_KEYS)
-    for key in ("cap", "mass", "cda", "cr", "peak", "aux", "loss", "stop_min"):
+    for key in ("cap", "mass", "cda", "cr", "peak", "aux", "loss", "stop_min", "price"):
         assert type(out[key]) is float, key
-    for key in ("length", "rise", "seed", "headwind", "temp", "soc0", "smin_stop", "smin_dest", "vmax"):
+    for key in ("length", "rise", "seed", "headwind", "tv", "soc0", "smin_stop", "smin_dest", "vmax"):
         assert type(out[key]) is int, key
     assert out["cap"] == 77.0 and out["length"] == 600 and out["headwind"] == 15 and out["stop_min"] == 5.0 and out["profile"] == "pass" and out["vehicle"] == "Pkw"
 
 
 # ------------------------------------------------------------------ Permalink
 def test_permalink_values_are_snapped_and_invalid_ones_ignored(fake_st):
-    fake_st.query_params.update({"len": "620", "veh": "Pkw", "prof": "unbekannt", "cap": "abc", "peak": "55", "temp": "-100", "seed": "500.0", "wmode": "wechselnd", "cda": "0.624"})
+    fake_st.query_params.update({"len": "620", "veh": "Pkw", "prof": "unbekannt", "cap": "abc", "peak": "55", "tv": "7", "price": "5", "stv": "1000", "seed": "500.0", "wmode": "wechselnd", "cda": "0.624"})
     PR.load_permalink_settings()
     s = fake_st.session_state
     assert s["length_slider"] == 600 and s["vehicle_select"] == "Pkw" and "profile_select" not in s and "cap_slider" not in s
-    assert s["peak_slider"] == 50.0 and s["temp_slider"] == C.TEMP_MIN and "seed_input" not in s and s["windmode_select"] == "wechselnd" and s["cda_slider"] == pytest.approx(0.62)
+    assert s["peak_slider"] == 50.0 and "tv_select" not in s and s["price_slider"] == C.PRICE_MAX and s["sweeptv_select"] == C.TV_FAST          # 7 €/h gibt es nicht; 5 €/kWh wird begrenzt
+    assert "seed_input" not in s and s["windmode_select"] == "wechselnd" and s["cda_slider"] == pytest.approx(0.62)
     assert type(s["length_slider"]) is int and type(s["peak_slider"]) is float and s["permalink_loaded"] is True
+
+
+def test_permalink_accepts_every_time_value_option_and_rejects_others(fake_st):
+    for tv in C.TV_OPTIONS:
+        fake_st.session_state.clear()
+        fake_st.query_params.clear()
+        fake_st.query_params.update({"tv": str(tv)})
+        PR.load_permalink_settings()
+        assert fake_st.session_state["tv_select"] == tv and type(fake_st.session_state["tv_select"]) is int
+    for bad in ("0", "3", "999", "-1", "abc", "20.5"):
+        fake_st.session_state.clear()
+        fake_st.query_params.clear()
+        fake_st.query_params.update({"tv": bad})
+        PR.load_permalink_settings()
+        assert "tv_select" not in fake_st.session_state, bad
 
 
 def test_permalink_is_read_only_once_per_session(fake_st):
@@ -222,6 +243,13 @@ def test_visible_texts_have_no_dashes_and_no_banned_words():
         assert not any(d in t for d in DASHES), t
         assert "Saatwert" not in t and "Gedankenstrich" not in t, t
     assert all(C.PRESET_HELP[n] for n in C.PRESET_ORDER)
+
+
+def test_time_value_options_run_from_economical_to_fast():
+    assert C.TV_OPTIONS == tuple(sorted(C.TV_OPTIONS)) and C.TV_OPTIONS[-1] == C.TV_FAST and C.DEFAULT_TV in C.TV_OPTIONS and C.DEFAULT_TV < C.TV_FAST
+    assert all(type(t) is int and t > 0 for t in C.TV_OPTIONS) and len(set(C.TV_OPTIONS)) == len(C.TV_OPTIONS)
+    assert C.tv_label(20) == "20 €/h" and C.tv_label(1) == "1 €/h" and C.tv_label(C.TV_FAST) == "∞ (Zeit allein)"
+    assert C.PRICE_MIN <= C.DEFAULT_PRICE <= C.PRICE_MAX and C.V_MIN == 60
 
 
 def test_format_helpers():

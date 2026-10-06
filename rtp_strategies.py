@@ -43,7 +43,7 @@ def rule_plan(trip: Trip, v: float) -> A.Plan:
     """Praxisregel mit konstanter Geschwindigkeit v (km/h)."""
     veh, rt = trip.vehicle, trip.route
     n = rt.n
-    E = np.array([P.cell_energy(veh, v, trip.temp, rt.grade[i], rt.wind[i]) for i in range(n)])
+    E = np.array([P.cell_energy(veh, v, rt.grade[i], rt.wind[i]) for i in range(n)])
     t_cell = C.DX_KM / v
     s = trip.soc0
     p = A.Plan("rule", True)
@@ -60,7 +60,7 @@ def rule_plan(trip: Trip, v: float) -> A.Plan:
             target = min(ceiling, need)
             if target <= s + 1e-9:
                 return A.Plan("rule", False, note=f"Die Praxisregel (Laden bis {C.RULE_CHARGE_TO:.0f} %) kommt nicht ans Ziel.")
-            ch = P.charge_time_exact(veh, trip.temp, trip.loss, s, target)
+            ch = P.charge_time_exact(veh, trip.loss, s, target)
             p.stops.append(A.Stop(i * C.DX_KM, 100.0 * s / veh.cap, 100.0 * target / veh.cap, 60.0 * ch, 60.0 * (ch + trip.stop_h)))
             p.charge_h += ch
             p.fix_h += trip.stop_h
@@ -68,7 +68,9 @@ def rule_plan(trip: Trip, v: float) -> A.Plan:
             p.trace.append((i * C.DX_KM, s))
             s = target
             p.trace.append((i * C.DX_KM, s))
-        s = min(s - E[i], veh.cap)
+        s_next = min(s - E[i], veh.cap)
+        p.used_kwh += s - s_next
+        s = s_next
         p.drive_h += t_cell
         p.trace.append(((i + 1) * C.DX_KM, s))
     if s < trip.smin_dest - C.SOC_EPS:

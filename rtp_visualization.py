@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 import rtp_constants as C
+import rtp_evaluation as E
 import rtp_results as R
 
 
@@ -82,38 +83,27 @@ def _line(fig, xs, ys, name, color, dash=None):
     fig.add_trace(go.Scatter(x=[str(x) for x in xs], y=ys, mode="lines+markers", name=name, line=dict(color=color, width=3, dash=dash), hovertemplate="%{x}: %{y:.1f}<extra>" + name + "</extra>"))
 
 
-def build_power_gap(res: dict, vmax: int) -> go.Figure:
-    """Messreihe: wie viel Prozent länger als das Optimum brauchen Praxisregel, Tempolimit mit optimalem Laden und beste konstante Geschwindigkeit, über der Ladeleistung (Tempolimit fest)."""
+def build_power_gap(res: dict, vmax: int, tv: int = C.TV_FAST) -> go.Figure:
+    """Messreihe: wie viel Prozent über dem Optimum liegt die Zielfunktion (Kosten; bei „Zeit allein“ die Reisezeit) von Praxisregel, Tempolimit mit optimalem Laden und bester konstanter
+    Geschwindigkeit, über der Ladeleistung (Tempolimit und Zeitwert fest)."""
     peaks = res["meta"]["peaks"]
     fig = go.Figure()
     for key in ("rule", "const_max", "const_best"):
-        _line(fig, [int(p) for p in peaks], [R.power_summary(res, p, vmax)[f"gap_{key}"] for p in peaks], C.METHOD_LABELS[key], C.METHOD_COLORS[key])
+        _line(fig, [int(p) for p in peaks], [R.power_summary(res, p, vmax, tv)[f"gap_{key}"] for p in peaks], C.METHOD_LABELS[key], C.METHOD_COLORS[key])
     fig.update_xaxes(title_text="Spitzenladeleistung (kW)", type="category")
-    fig.update_yaxes(title_text="Reisezeit über dem Optimum (%)", rangemode="tozero")
+    fig.update_yaxes(title_text="Reisezeit über dem Optimum (%)" if tv >= C.TV_FAST else "Kosten über dem Optimum (%)", rangemode="tozero")
     return _lock(fig, 360)
 
 
-def build_best_speed(res: dict) -> go.Figure:
-    """Messreihe: beste konstante Geschwindigkeit über der Ladeleistung, eine Linie je Tempolimit."""
+def build_best_speed(res: dict, tv: int = C.TV_FAST) -> go.Figure:
+    """Messreihe: beste konstante Geschwindigkeit über der Ladeleistung, eine Linie je Tempolimit (bei dem Zeitwert `tv`)."""
     peaks = res["meta"]["peaks"]
     fig = go.Figure()
     shades = ("#9ecae1", "#6baed6", "#3182bd", "#08519c")
     for vmax, color in zip(res["meta"]["vmaxes"], shades):
-        _line(fig, [int(p) for p in peaks], [R.power_summary(res, p, vmax)["v_best"] for p in peaks], f"Tempolimit {vmax} km/h", color)
+        _line(fig, [int(p) for p in peaks], [R.power_summary(res, p, vmax, tv)["v_best"] for p in peaks], f"Tempolimit {vmax} km/h", color)
     fig.update_xaxes(title_text="Spitzenladeleistung (kW)", type="category")
     fig.update_yaxes(title_text="Beste konstante Geschwindigkeit (km/h)", rangemode="tozero")
-    return _lock(fig, 360)
-
-
-def build_temp(res: dict) -> go.Figure:
-    """Messreihe: Reisezeit des Optimums über der Außentemperatur, bezogen auf 20 °C (Prozent), eine Linie je Streckenlänge."""
-    fig = go.Figure()
-    colors = ("#9ecae1", "#3182bd", "#08519c")
-    for length, color in zip(res["meta"]["lengths"], colors):
-        ref = R.temp_summary(res, 20, length)["t_opt"]
-        _line(fig, res["meta"]["temps"], [100.0 * (R.temp_summary(res, t, length)["t_opt"] / ref - 1.0) for t in res["meta"]["temps"]], f"{length} km", color)
-    fig.update_xaxes(title_text="Außentemperatur (°C)", type="category")
-    fig.update_yaxes(title_text="Mehr Reisezeit gegenüber 20 °C (%)", rangemode="tozero")
     return _lock(fig, 360)
 
 
@@ -129,10 +119,73 @@ def build_wind(res: dict) -> go.Figure:
     return _lock(fig, 360)
 
 
-def build_vehicles(res: dict, length: int) -> go.Figure:
-    """Messreihe: wie viel länger die Praxisregel gegenüber dem Optimum braucht, je Fahrzeug-Preset."""
+def build_vehicles(res: dict, length: int, tv: int = C.TV_FAST) -> go.Figure:
+    """Messreihe: wie viel mehr die Praxisregel gegenüber dem Optimum kostet (bei „Zeit allein“: wie viel länger sie braucht), je Fahrzeug-Preset."""
     names = res["meta"]["vehicles"]
-    fig = go.Figure(go.Bar(x=names, y=[R.vehicle_summary(res, v, length)["gap_rule"] for v in names], marker_color=C.METHOD_COLORS["rule"],
-                           error_y=dict(type="data", array=[R.vehicle_summary(res, v, length)["gap_rule_se"] for v in names]), hovertemplate="%{x}: %{y:.1f} %<extra></extra>"))
+    fig = go.Figure(go.Bar(x=names, y=[R.vehicle_summary(res, v, length, tv)["gap_rule"] for v in names], marker_color=C.METHOD_COLORS["rule"],
+                           error_y=dict(type="data", array=[R.vehicle_summary(res, v, length, tv)["gap_rule_se"] for v in names]), hovertemplate="%{x}: %{y:.1f} %<extra></extra>"))
     fig.update_yaxes(title_text="Praxisregel über dem Optimum (%)")
     return _lock(fig, 340)
+
+
+def build_spectrum_sweep(res: dict, length: int) -> go.Figure:
+    """Messreihe: die Spanne je Fahrzeug. Je Zeitwert ein Punkt: Reisezeit und Verbrauch des Optimums, bezogen auf „Zeit allein“ (100 %), Mittel über die Zufallsstrecken."""
+    fig = go.Figure()
+    colors = ("#9ecae1", "#6baed6", "#3182bd", "#08519c", "#c77700")
+    for name, color in zip(res["meta"]["vehicles"], colors):
+        pts = R.spectrum(res, name, length)
+        base = pts[-1]
+        fig.add_trace(go.Scatter(x=[100.0 * p["t_opt"] / base["t_opt"] for p in pts], y=[100.0 * p["cons_opt"] / base["cons_opt"] for p in pts], mode="lines+markers", name=name,
+                                 line=dict(color=color, width=3), text=[C.tv_label(p["tv"]) for p in pts],
+                                 hovertemplate="Zeitwert %{text}: Reisezeit %{x:.0f} %, Verbrauch %{y:.0f} %<extra>" + name + "</extra>"))
+    fig.update_xaxes(title_text="Reisezeit (% von „Zeit allein“)")
+    fig.update_yaxes(title_text="Verbrauch (% von „Zeit allein“)", rangemode="tozero")
+    return _lock(fig, 380)
+
+
+def build_energy_bars(run: dict) -> go.Figure:
+    """Verbrauch (der Batterie entnommene Energie) je Verfahren in kWh je 100 km."""
+    keys = [k for k in C.METHODS if run["plans"][k].feasible]
+    values = [E.consumption(run, k) for k in keys]
+    fig = go.Figure(go.Bar(x=[C.METHOD_LABELS[k] for k in keys], y=values, marker_color=[C.METHOD_COLORS[k] for k in keys], text=[f"{v:.1f}" for v in values], textposition="outside",
+                           hovertemplate="%{x}: %{y:.1f} kWh/100 km<extra></extra>"))
+    fig.update_yaxes(title_text="Verbrauch (kWh/100 km)", rangemode="tozero")
+    return _lock(fig, 380)
+
+
+SPECTRUM_LABELLED = (1, 5, 10, 20, C.TV_FAST)        # Zeitwerte, die in der Spanne beschriftet werden (die übrigen nur beim Überfahren; sonst überlagern sich die Texte)
+
+
+def build_spectrum(run: dict, front: list, curve: list) -> go.Figure:
+    """Die Spanne für die gewählte Fahrt: Reisezeit (x) gegen Energiekosten (y). Linie = Optimum je Zeitwert, gepunktet = konstante Geschwindigkeiten mit zeitoptimalem Laden, Rauten = die vier
+    Verfahren beim gewählten Zeitwert. Die graue Gerade hat die Steigung −Zeitwert und berührt die Linie im gewählten Optimum (gleiche Kosten entlang der Geraden). Die Achsen zeigen nur den
+    Bereich der Punkte (die Gerade wird abgeschnitten)."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[c["time_min"] / 60.0 for c in curve], y=[c["energy_cost"] for c in curve], mode="lines+markers", name="Konstante Geschwindigkeit",
+                             line=dict(color="#2e7d4f", width=2, dash="dot"), marker=dict(size=5), customdata=[f"{c['v']} km/h" for c in curve],
+                             hovertemplate="%{customdata}: %{x:.2f} h, %{y:.1f} €<extra>Konstante Geschwindigkeit</extra>"))
+    fig.add_trace(go.Scatter(x=[f["time_min"] / 60.0 for f in front], y=[f["energy_cost"] for f in front], mode="lines+markers+text", name="Optimum je Zeitwert",
+                             line=dict(color=C.METHOD_COLORS["opt"], width=3), marker=dict(size=8), customdata=[C.tv_label(f["tv"]) for f in front],
+                             text=[C.tv_label(f["tv"]) if f["tv"] in SPECTRUM_LABELLED else "" for f in front], textposition="top right", textfont=dict(size=11, color=C.METHOD_COLORS["opt"]),
+                             hovertemplate="Zeitwert %{customdata}: %{x:.2f} h, %{y:.1f} €<extra>Optimum</extra>"))
+    plans = run["plans"]
+    opt = plans["opt"]
+    xs_all = [c["time_min"] / 60.0 for c in curve] + [f["time_min"] / 60.0 for f in front] + [plans[k].time_h for k in C.METHODS if plans[k].feasible]
+    ys_all = [c["energy_cost"] for c in curve] + [f["energy_cost"] for f in front] + [E.energy_cost(run, k) for k in C.METHODS if plans[k].feasible]
+    if not E.time_only(run) and opt.feasible and front:
+        tv = run["trip"].w_time
+        x0, y0 = opt.time_h, E.energy_cost(run, "opt")
+        xs = [min(f["time_min"] for f in front) / 60.0 * 0.95, max(f["time_min"] for f in front) / 60.0 * 1.05]
+        fig.add_trace(go.Scatter(x=xs, y=[y0 - tv * (x - x0) for x in xs], mode="lines", name="Gleiche Kosten", line=dict(color="#999", width=1.5, dash="dash"), hoverinfo="skip"))
+    for key in C.METHODS:
+        if plans[key].feasible:
+            fig.add_trace(go.Scatter(x=[plans[key].time_h], y=[E.energy_cost(run, key)], mode="markers", name=C.METHOD_LABELS[key],
+                                     marker=dict(symbol="diamond", size=14, color=C.METHOD_COLORS[key], line=dict(color="white", width=1.5)),
+                                     hovertemplate=f"{C.METHOD_LABELS[key]}: " + "%{x:.2f} h, %{y:.1f} €<extra></extra>"))
+    fig.update_xaxes(title_text="Reisezeit (h)")
+    fig.update_yaxes(title_text="Energiekosten (€)")
+    if xs_all and ys_all:
+        px, py = 0.06 * (max(xs_all) - min(xs_all)) + 1e-9, 0.08 * (max(ys_all) - min(ys_all)) + 1e-9
+        fig.update_xaxes(range=[min(xs_all) - px, max(xs_all) + px])
+        fig.update_yaxes(range=[min(ys_all) - py, max(ys_all) + py])
+    return _lock(fig, 460)
