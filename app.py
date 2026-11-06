@@ -54,6 +54,19 @@ optimalem Laden**, der **besten konstanten Geschwindigkeit** und dem **Optimum**
 eine wechselnde Geschwindigkeit überhaupt lohnt**. Die Außentemperatur ist konstant und mild angenommen.
 """
 )
+
+# erklaerseite:einfach:start (erzeugt von tools/set_demo_explainer.py (Website-Repo) aus tools/content/explainers/reisetempo-erklaert.json, nicht von Hand ändern)
+with st.expander("💬 In einfachen Worten"):
+    st.markdown(
+        """
+Wer ein Elektroauto weit fährt, entscheidet zwei Dinge: wie schnell er fährt und wo und wie voll er lädt. Schneller fahren verbraucht mehr Strom, und mehr Strom heißt mehr Ladezeit. Wie viel eine Stunde Reisezeit wert ist, der **Zeitwert**, wählt den Punkt zwischen möglichst sparsam und möglichst schnell.
+
+Die Demo plant die Fahrt für ein Musterfahrzeug auf einer Strecke mit Höhenprofil und Wind und vergleicht eine einfache Regel (Tempolimit fahren, bei Bedarf bis 80 % laden) mit dem Optimum. **Fahrzeugwerte und Ladekurven sind Größenordnungen, keine Herstellerangaben; Zeitwert und Strompreis sind Annahmen.** Ladesäulen sind überall verfügbar, die Temperatur ist konstant.
+
+[Ausführlich und verständlich erklärt, mit Fachteil](https://sebastianhanisch.net/reisetempo-erklaert.html)
+        """
+    )
+# erklaerseite:einfach:end
 st.caption(
     "Gegenstück zur [Ladestrategie](https://sebastianhanisch-ladestrategie-demo.streamlit.app/) (dort wird Energie bei fester Geschwindigkeit minimiert, die Temperatur und das Batterieheizen werden "
     "untersucht; hier die Geschwindigkeit frei zwischen Zeit und Energie, mit Ladekurve), verwandt mit der [Geschwindigkeitsoptimierung](https://sebastianhanisch-slow-steaming-demo.streamlit.app/) "
@@ -336,6 +349,23 @@ Fehlerboden von etwa 0,1 %; Unterschiede darunter sind nicht belastbar. Die Prax
     )
 
 with st.expander("📐 Mathematische Formulierung"):
+    # erklaerseite:lesehilfe:start (erzeugt von tools/set_demo_explainer.py (Website-Repo) aus tools/content/explainers/reisetempo-erklaert.json, nicht von Hand ändern)
+    st.markdown(
+        r"""
+**Lesehilfe.** Gegeben sind ein Fahrzeug (Kapazität, Ladeleistung, Masse, Luftwiderstand), eine Strecke aus Zellen mit Steigung und Gegenwind, ein Zeitwert und ein Strompreis. Gesucht sind die Geschwindigkeit je Zelle und der Ladeplan (wo, von welchem auf welchen Ladestand), die Zeitwert mal Reisezeit plus bewertete Energie klein halten.
+
+| Symbol | Bedeutung |
+|---|---|
+| $w_t$, $w_e$ | Zeitwert (€ je Stunde) und Energiegewicht (€ je kWh) |
+| $T$, $U$ | Reisezeit und der Batterie entnommene Energie |
+| $v_i$, $\Delta x$ | Geschwindigkeit in Zelle $i$, Zellenlänge |
+| $s$ | Ladestand in kWh |
+| $F_i$ | Kraft am Rad in Zelle $i$ |
+
+[Schritt für Schritt erklärt, mit Herleitung und Literatur](https://sebastianhanisch.net/reisetempo-erklaert.html#fachleute)
+        """
+    )
+    # erklaerseite:lesehilfe:end
     st.markdown(
         r"""
 **Zielfunktion.** $J = w_t\, T + w_e\, U$ mit der Reisezeit $T = \sum_i \frac{\Delta x}{v_i} + \sum_{\text{Stopps}} \big(t_\mathrm{fix} + T_\mathrm{ch}(s'_k) - T_\mathrm{ch}(s_k)\big)$, der Ladezeitfunktion
